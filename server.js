@@ -34,6 +34,7 @@ const app = express();
 const RAW_PORT = process.env.PORT;
 const PORT = (RAW_PORT && parseInt(RAW_PORT, 10) > 0) ? parseInt(RAW_PORT, 10) : 4000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'lab-admin-2026';
+const ADMIN_PASSWORD_IS_DEFAULT = !process.env.ADMIN_PASSWORD;
 
 // behind Render's proxy, req.ip/protocol come from X-Forwarded-* headers
 app.set('trust proxy', 1);
@@ -377,7 +378,7 @@ if (require.main === module) {
     console.log('  SecondShift — by Rishi Raj Singh');
     console.log(`  ▸ http://localhost:${PORT}`);
     if (process.env.RENDER_EXTERNAL_URL) console.log(`  ▸ live: ${process.env.RENDER_EXTERNAL_URL}`);
-    console.log(`  ▸ admin: /admin.html (password: ${ADMIN_PASSWORD})`);
+    console.log(`  ▸ admin: /admin.html (password: ${ADMIN_PASSWORD_IS_DEFAULT ? '⚠️ DEFAULT — set ADMIN_PASSWORD!' : '•••••••• (set, hidden)'})`);
     console.log(`  ▸ data: ${cs.enabled ? 'LOCAL + ' + cs.provider.toUpperCase() + ' cloud sync' : 'LOCAL (set CLOUD_GIST_TOKEN or FIREBASE_DB_URL to sync)'}`);
     console.log('──────────────────────────────────────────');
   });
