@@ -1,0 +1,16 @@
+{
+  "name": "secondshift",
+  "version": "1.0.0",
+  "description": "SecondShift — AI automations for local business, built by Rishi Raj Singh. Watch the shift work, then hire it.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node scripts/seed.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "kokoro-js": "^1.2.1"
+  },
+  "license": "MIT"
+}

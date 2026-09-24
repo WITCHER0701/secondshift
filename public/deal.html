@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hire the Shift — SecondShift</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="description" content="Tell Rishi Raj Singh which automations you tested and what your business needs. You'll hear back within one business day.">
+<link rel="stylesheet" href="/styles.css">
+  <meta property="og:title" content="SecondShift — business automations that work after close">
+  <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
+  <meta property="og:image" content="/logo.png">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <img src="/logo.png" alt="SecondShift" style="height:20px;width:auto;display:block">
+    </a>
+    <div class="nav-links">
+      <a href="/index.html">Home</a>
+      <a href="/automations.html">Automations</a>
+      <a href="/test-drive.html">Test Drive</a>
+      <a href="/process.html">Process</a>
+    </div>
+  </div>
+</nav>
+
+<header class="page-hero" style="padding-bottom:30px">
+  <div class="hero-glow" style="position:absolute;inset:0" data-parallax="0.15"></div>
+  <div class="page-hero-inner">
+    <span class="eyebrow">Hire the Shift</span>
+    <h1>Tested it?<br><span class="text-gradient">Let's clock it in.</span></h1>
+    <p class="lead" style="max-width:560px;margin-top:18px">Two minutes of details, straight to Rishi Raj Singh — the engineer who builds these. One business day to hear back. Just a scope, a price and a timeline.</p>
+  </div>
+</header>
+
+<section class="section" style="padding-top:20px">
+  <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:40px;align-items:start" id="dealLayout">
+    <!-- FORM -->
+    <div class="form-panel">
+      <form id="dealForm" novalidate>
+        <div class="form-row">
+          <div class="field"><label for="fName">Your name *</label><input id="fName" autocomplete="name" placeholder="Alex Smith"></div>
+          <div class="field"><label for="fEmail">Work email *</label><input id="fEmail" type="email" autocomplete="email" placeholder="alex@company.com"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="fCompany">Business name *</label><input id="fCompany" autocomplete="organization" placeholder="Sunny Auto Repair"></div>
+          <div class="field"><label for="fIndustry">Industry</label>
+            <select id="fIndustry">
+              <option value="">Select…</option>
+              <option>Restaurant / food service</option>
+              <option>Salon / spa / beauty</option>
+              <option>Auto repair / detailing</option>
+              <option>Home services / contractor</option>
+              <option>Clinic / healthcare</option>
+              <option>Professional services</option>
+              <option>E-commerce / retail</option>
+              <option>Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Which workers do you want on your shift? *</label>
+          <div class="picker" id="autoPicker"><!-- injected --></div>
+        </div>
+
+        <div class="form-row">
+          <div class="field"><label for="fBudget">Monthly budget</label>
+            <select id="fBudget">
+              <option value="">Select…</option>
+              <option>Under $500</option>
+              <option>$500 – $1,000</option>
+              <option>$1,000 – $2,500</option>
+              <option>$2,500+</option>
+            </select>
+          </div>
+          <div class="field"><label for="fTimeline">Timeline</label>
+            <select id="fTimeline">
+              <option value="">Select…</option>
+              <option>ASAP — this week</option>
+              <option>Within a month</option>
+              <option>Exploring — 1-3 months</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="fMsg">What should this automation do for your business?</label>
+          <textarea id="fMsg" placeholder="We complete ~40 brake jobs a month and have 14 Google reviews. We want the review automation live before the holidays…"></textarea>
+        </div>
+
+        <button class="btn btn-primary btn-block" type="submit" id="submitBtn">Send my brief →</button>
+        <div class="form-error" id="formError"></div>
+        <p class="dim" style="font-size:12px;margin-top:14px;text-align:center">Your brief lands directly with Rishi Raj Singh — the engineer who builds these. Reply within one business day, guaranteed.</p>
+      </form>
+    </div>
+
+    <!-- SIDE -->
+    <div>
+      <div class="info-card reveal" style="margin-bottom:18px">
+        <div class="ic">✅</div>
+        <h3>What happens next</h3>
+        <p style="margin-top:12px"><b style="color:var(--text)">1.</b> Rishi replies within one business day — personally.<br>
+        <b style="color:var(--text)">2.</b> 30-minute call — he maps the shift to your workflow.<br>
+        <b style="color:var(--text)">3.</b> Fixed quote. Build starts on approval, live in days.</p>
+      </div>
+      <div class="info-card reveal reveal-d1">
+        <div class="ic">🛡️</div>
+        <h3>The guarantee</h3>
+        <p style="margin-top:12px">If the shift doesn't perform as demonstrated on this site in its first 30 days, you don't pay that month.</p>
+      </div>
+      <div class="info-card reveal reveal-d2">
+        <div class="ic">👤</div>
+        <h3>Who you're hiring</h3>
+        <p style="margin-top:12px"><b style="color:var(--text)">Rishi Raj Singh</b> — automation engineer. Built every system on this site solo. No agency layers, no account managers. You talk to the builder.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUCCESS STATE -->
+  <div class="form-panel success-panel" id="dealSuccess" style="display:none">
+    <div class="big">🌙</div>
+    <h2 style="margin-bottom:12px">Shift request received.</h2>
+    <p class="lead" style="max-width:480px;margin:0 auto 8px">Check your inbox — a confirmation is on its way. Rishi will get back to you within one business day.</p>
+    <p class="dim" style="font-size:13px;margin-bottom:30px">Reference: <b id="dealRef" style="color:var(--text)"></b></p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <a class="btn btn-ghost" href="/test-drive.html">Test another automation</a>
+      <a class="btn btn-primary" href="/">Back to home</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div style="max-width:300px">
+      <div class="nav-logo" style="margin-bottom:12px">
+        <img src="/logo.png" alt="SecondShift" style="height:22px;width:auto;display:block">
+      </div>
+      <p class="dim" style="font-size:13px">Watch the shift work. Then hire it.</p>
+    </div>
+    <div>
+      <h5>Explore</h5>
+      <a href="/index.html">Home</a>
+      <a href="/automations.html">Automations</a>
+      <a href="/test-drive.html">Test Drive</a>
+    </div>
+    <div>
+      <h5>Business</h5>
+      <a href="/process.html">Process</a>
+      <a href="/admin.html">Owner login</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2026 SecondShift · Built and operated by Rishi Raj Singh</div>
+</footer>
+
+<script src="/script.js"></script>
+<script src="/scroll.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let automations = [];
+  const urlParams = new URLSearchParams(location.search);
+
+  fetch('/api/automations').then(r => r.json()).then(({ automations: list }) => {
+    automations = list;
+    $('autoPicker').innerHTML = automations.map(a => `
+      <label class="pick" data-slug="${a.slug}">
+        <span class="pi">${a.icon}</span>
+        <span style="flex:1"><b>${a.name}</b><span>${a.priceLabel}</span></span>
+        <input type="checkbox" value="${a.slug}">
+      </label>
+    `).join('');
+    document.querySelectorAll('.pick').forEach(p => p.addEventListener('click', (e) => {
+      e.preventDefault();
+      p.classList.toggle('on');
+      p.querySelector('input').checked = p.classList.contains('on');
+    }));
+    // preselect from ?auto=
+    const wanted = urlParams.get('auto');
+    if (wanted) {
+      const p = document.querySelector(`.pick[data-slug="${wanted}"]`);
+      if (p) { p.classList.add('on'); p.querySelector('input').checked = true; }
+    }
+  });
+
+  function showErrors(errors) {
+    const box = $('formError');
+    box.innerHTML = errors.map(e => '• ' + e).join('<br>');
+    box.classList.add('show');
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  $('dealForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('formError').classList.remove('show');
+    const slugs = [...document.querySelectorAll('.pick.on input')].map(i => i.value);
+    const payload = {
+      name: $('fName').value,
+      email: $('fEmail').value,
+      company: $('fCompany').value,
+      industry: $('fIndustry').value,
+      automationSlugs: slugs,
+      monthlyBudget: $('fBudget').value,
+      timeline: $('fTimeline').value,
+      message: $('fMsg').value,
+    };
+    const btn = $('submitBtn');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const res = await fetch('/api/deals', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await res.json();
+      if (!res.ok) { showErrors(j.errors || [j.error || 'Something went wrong']); return; }
+      // success
+      $('dealLayout').style.display = 'none';
+      $('dealSuccess').style.display = 'block';
+      $('dealRef').textContent = j.id;
+      $('dealSuccess').scrollIntoView({ behavior: 'smooth' });
+    } catch (err) {
+      showErrors(['Network error — please try again.']);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Send my brief →';
+    }
+  });
+})();
+</script>
+</body>
+</html>

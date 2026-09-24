@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Call The Voice — SecondShift</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  .call-wrap { max-width: 960px; margin: 0 auto; padding: calc(var(--nav-h) + 40px) 22px 80px; }
+  .call-grid { display: grid; grid-template-columns: 1fr 360px; gap: 40px; align-items: start; }
+  .call-panel { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 32px; }
+  .call-log { display: flex; flex-direction: column; gap: 12px; min-height: 300px; max-height: 460px; overflow-y: auto; padding-right: 6px; }
+  .cl-line { max-width: 80%; padding: 12px 16px; border-radius: 16px; font-size: 14.5px; line-height: 1.5; animation: bubble-in .3s var(--ease); }
+  .cl-agent { align-self: flex-start; background: rgba(41, 151, 255, 0.12); border: 1px solid rgba(41,151,255,.25); border-bottom-left-radius: 4px; }
+  .cl-caller { align-self: flex-end; background: var(--bg-raise); border: 1px solid var(--line); border-bottom-right-radius: 4px; }
+  .cl-who { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; opacity: .6; }
+  .cl-status { display: flex; align-items: center; gap: 10px; padding: 12px 0 18px; color: var(--text-2); font-size: 13.5px; }
+  .wave { display: flex; gap: 3px; align-items: center; height: 18px; }
+  .wave i { width: 3px; background: var(--accent); border-radius: 2px; height: 6px; transition: height .15s; }
+  .wave.live i { animation: wv .9s ease-in-out infinite; }
+  .wave.live i:nth-child(2) { animation-delay: .12s; } .wave.live i:nth-child(3) { animation-delay: .24s; }
+  .wave.live i:nth-child(4) { animation-delay: .36s; } .wave.live i:nth-child(5) { animation-delay: .48s; }
+  @keyframes wv { 0%,100% { height: 5px; } 50% { height: 16px; } }
+  .mic-big {
+    width: 110px; height: 110px; border-radius: 50%; border: 0; cursor: pointer;
+    background: radial-gradient(circle at 32% 30%, #4aa8ff, #0a84ff 60%, #0060df);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 14px 44px rgba(41, 151, 255, .4);
+    transition: transform .25s var(--ease), box-shadow .25s;
+    margin: 0 auto;
+  }
+  .mic-big:hover { transform: scale(1.05); }
+  .mic-big.listening { background: radial-gradient(circle at 32% 30%, #ff7a7a, #ef4444 60%, #dc2626); box-shadow: 0 0 0 10px rgba(239,68,68,.15), 0 14px 44px rgba(239,68,68,.4); animation: micpulse 1.6s infinite; }
+  @keyframes micpulse { 0%,100% { box-shadow: 0 0 0 8px rgba(239,68,68,.12), 0 14px 44px rgba(239,68,68,.4); } 50% { box-shadow: 0 0 0 18px rgba(239,68,68,.05), 0 14px 44px rgba(239,68,68,.4); } }
+  .mic-hint { text-align: center; color: var(--text-2); font-size: 13px; margin-top: 14px; }
+  .textrow { display: flex; gap: 10px; margin-top: 18px; }
+  .textrow input { flex: 1; padding: 13px 16px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--bg-raise); color: var(--text); font: inherit; font-size: 14.5px; }
+  .textrow input:focus { outline: none; border-color: var(--accent); }
+  .slots { display: flex; flex-direction: column; gap: 10px; }
+  .slot { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 13px 16px; display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; }
+  .slot b { font-weight: 600; color: var(--text); }
+  .slot .lab { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .slot.filled { border-color: rgba(48, 209, 88, .4); }
+  .slot.filled .lab { color: #30d158; }
+  .endnote { margin-top: 18px; background: rgba(48, 209, 88, .08); border: 1px solid rgba(48, 209, 88, .35); color: #4ade80; border-radius: 12px; padding: 14px 16px; font-size: 13.5px; display: none; }
+  .endnote.show { display: block; }
+  .voice-box { margin-top: 14px; background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .vb-row { display: flex; align-items: center; }
+  .vb-title { font-size: 12px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+  .vb-dot { width: 8px; height: 8px; border-radius: 50%; background: #8e8e93; display: inline-block; }
+  .vb-dot.sys { background: #ff9f0a; } .vb-dot.kokoro { background: #30d158; box-shadow: 0 0 8px rgba(48,209,88,.6); }
+  .vb-dot.loading { background: #2997ff; animation: vbload 1s ease-in-out infinite alternate; }
+  @keyframes vbload { from { opacity: .4; } to { opacity: 1; } }
+  .vb-progress { margin-top: 8px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .vb-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #2997ff, #64d2ff); transition: width .3s; }
+  .vb-select { flex: 1; background: var(--bg-card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+  .vb-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-card); color: var(--text); cursor: pointer; }
+  .vb-btn:hover { border-color: var(--accent); }
+  @media (max-width: 900px) { .call-grid { grid-template-columns: 1fr; } }
+</style>
+  <meta property="og:title" content="SecondShift — business automations that work after close">
+  <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
+  <meta property="og:image" content="/logo.png">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <img src="/logo.png" alt="SecondShift" style="height:20px;width:auto;display:block">
+    </a>
+    <div class="nav-links">
+      <a href="/index.html">Home</a>
+      <a href="/automations.html">The Crew</a>
+      <a href="/test-drive.html">Test Drive</a>
+      <a href="/deal.html" class="nav-cta">Hire the Shift</a>
+    </div>
+  </div>
+</nav>
+
+<div class="call-wrap">
+  <span class="eyebrow">The Voice · Live Call</span>
+  <h1 style="font-size:clamp(1.8rem,4vw,2.6rem);margin-bottom:8px">Talk to the <span class="text-gradient">voice agent.</span></h1>
+  <p class="lead" style="max-width:620px;margin-bottom:34px">This is a real call with the real agent — speak or type, it listens, books, and answers. Everything runs free: your browser does the hearing and speaking, the agent brain runs on this site.</p>
+
+  <div class="call-grid">
+    <div class="call-panel">
+      <div class="cl-status">
+        <div class="wave" id="wave"><i></i><i></i><i></i><i></i><i></i></div>
+        <span id="statusText">Ready — tap the mic and just talk</span>
+      </div>
+      <div class="call-log" id="callLog"></div>
+      <button class="mic-big" id="micBtn" aria-label="Start talking" title="Tap to talk">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
+          <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/>
+          <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M12 18v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <p class="mic-hint" id="micHint">or type below — both work the same</p>
+      <div class="textrow">
+        <input id="textInput" placeholder="e.g. I need a brake service tomorrow at 3pm" autocomplete="off">
+        <button class="btn btn-primary" id="sendBtn">Send</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="call-panel" style="padding:26px">
+        <h3 style="font-size:1rem;margin-bottom:14px">Booking details</h3>
+        <div class="slots">
+          <div class="slot" id="slotService"><span class="lab">Service</span><b>—</b></div>
+          <div class="slot" id="slotWhen"><span class="lab">When</span><b>—</b></div>
+          <div class="slot" id="slotName"><span class="lab">Name</span><b>—</b></div>
+          <div class="slot" id="slotPhone"><span class="lab">Phone</span><b>—</b></div>
+        </div>
+        <div class="endnote" id="endNote">🎉 <b>Booked!</b> This appointment is now in the owner dashboard — that's exactly what your customers will experience.</div>
+        <div class="voice-box">
+          <div class="vb-row" style="justify-content:space-between">
+            <span class="vb-title"><span id="vbDot" class="vb-dot"></span> <span id="vbLabel">Voice: loading…</span></span>
+            <label style="display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--text-2);cursor:pointer">
+              <input type="checkbox" id="vbNatural" checked style="accent-color:#2997ff"> Natural voice
+            </label>
+          </div>
+          <div id="vbProgress" class="vb-progress hidden"><div class="vb-bar" id="vbBar"></div></div>
+          <div class="vb-row" style="gap:8px;margin-top:8px">
+            <select id="vbVoice" class="vb-select" title="Agent voice"></select>
+            <button id="vbPreview" class="vb-btn" title="Hear this voice">▶</button>
+          </div>
+          <div class="vb-row" style="gap:8px;margin-top:8px;align-items:center">
+            <span class="vb-title" style="opacity:.7">Speed</span>
+            <input type="range" id="vbRate" min="0.8" max="1.25" step="0.05" value="1" style="flex:1;accent-color:#2997ff">
+            <span id="vbRateVal" class="vb-title" style="width:32px;text-align:right">1×</span>
+          </div>
+        </div>
+        <div class="voice-box" id="vapiBox" style="border-color:rgba(41,151,255,.35)">
+          <div class="vb-row" style="justify-content:space-between">
+            <span class="vb-title"><span id="vapiDot" class="vb-dot"></span> <span id="vapiLabel">Pro line: Vapi · not configured</span></span>
+          </div>
+          <p class="dim" id="vapiHint" style="font-size:11.5px;margin:8px 0 0;line-height:1.55">Upgrade path: route The Voice through <b>Vapi</b> for production-grade speech recognition, interruption handling and a real phone number. Add <code>VAPI_PUBLIC_KEY</code> + <code>VAPI_ASSISTANT_ID</code> to .env — see VOICE-VAPI.md. The booking brain stays ours.</p>
+        <div class="vb-row" style="gap:8px;margin-top:10px">
+          <button id="vapiStart" class="btn btn-primary btn-sm" style="flex:1;display:none">📞 Call on the pro line</button>
+          <button id="vapiEnd" class="btn btn-ghost btn-sm" style="flex:1;display:none">Hang up</button>
+        </div>
+        </div>
+      </div>
+        <p class="dim" style="font-size:11.5px;margin-top:16px;text-align:center;line-height:1.6">100% free stack: Web Speech API (mic) · rule-based agent brain (this server) · <b>Kokoro-82M neural voice</b> (open-source, runs in your browser — no API, no per-minute billing). Optional local-LLM polish via Ollama — see VOICE-AGENT.md.</p>
+    </div>
+  </div>
+</div>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div style="max-width:300px">
+      <div class="nav-logo" style="margin-bottom:12px">
+        <img src="/logo.png" alt="SecondShift" style="height:22px;width:auto;display:block">
+      </div>
+      <p class="dim" style="font-size:13px">Watch the shift work. Then hire it.</p>
+    </div>
+    <div>
+      <h5>Explore</h5>
+      <a href="/index.html">Home</a>
+      <a href="/automations.html">The crew</a>
+      <a href="/process.html">Process</a>
+    </div>
+    <div>
+      <h5>Business</h5>
+      <a href="/deal.html">Hire the shift</a>
+      <a href="/admin.html">Owner login</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2026 SecondShift · Built and operated by Rishi Raj Singh</div>
+</footer>
+
+<script src="/script.js"></script>
+<script src="/scroll.js"></script>
+<script src="/tts.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let callId = null;
+  let busy = false;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null;
+  let listening = false;
+
+  const log = $('callLog');
+  const TTS = window.SecondShiftVoice;
+
+  // ── voice quality panel ──
+  const voiceSel = $('vbVoice');
+  for (const [id, v] of Object.entries(TTS.VOICES)) {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = v.label;
+    voiceSel.appendChild(o);
+  }
+  voiceSel.value = TTS.state.voice;
+  voiceSel.addEventListener('change', () => TTS.setVoice(voiceSel.value));
+  $('vbNatural').checked = TTS.state.mode === 'kokoro';
+  $('vbNatural').addEventListener('change', (e) => TTS.setMode(e.target.checked ? 'kokoro' : 'system'));
+  $('vbRate').value = TTS.state.rate;
+  $('vbRateVal').textContent = TTS.state.rate + '×';
+  $('vbRate').addEventListener('input', (e) => { TTS.setRate(e.target.value); $('vbRateVal').textContent = (+e.target.value).toFixed(2).replace(/0$/, '') + '×'; });
+  $('vbPreview').addEventListener('click', () => { TTS.stop(); TTS.speak('Hi, this is your receptionist. I never take a day off.'); });
+  TTS.onChange((s) => {
+    const dot = $('vbDot'), label = $('vbLabel'), prog = $('vbProgress'), bar = $('vbBar');
+    if (s.failed || s.mode === 'system') { dot.className = 'vb-dot sys'; label.textContent = 'Voice: system'; }
+    else if (s.ready) { dot.className = 'vb-dot kokoro'; label.textContent = 'Voice: Kokoro neural · ready'; prog.classList.add('hidden'); }
+    else if (s.loading) {
+      dot.className = 'vb-dot loading';
+      label.textContent = 'Downloading neural voice · ' + Math.round((s.progress || 0) * 100) + '%';
+      prog.classList.remove('hidden'); bar.style.width = Math.round((s.progress || 0) * 100) + '%';
+    } else { dot.className = 'vb-dot'; label.textContent = 'Voice: system (natural voice ready to enable)'; }
+  });
+
+  function addLine(role, text) {
+    const d = document.createElement('div');
+    d.className = 'cl-line ' + (role === 'agent' ? 'cl-agent' : 'cl-caller');
+    d.innerHTML = `<div class="cl-who">${role === 'agent' ? 'The Voice' : 'You'}</div>${text.replace(/</g,'&lt;')}`;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+  function setStatus(txt, listeningNow) {
+    $('statusText').textContent = txt;
+    $('wave').classList.toggle('live', !!listeningNow);
+    $('micBtn').classList.toggle('listening', !!listeningNow);
+  }
+  function speak(text) { TTS.speak(text); }
+
+  function updateSlots(slots) {
+    const map = { service: 'slotService', when: 'slotWhen', name: 'slotName', phone: 'slotPhone' };
+    for (const k in map) {
+      const el = $(map[k]);
+      const val = slots[k];
+      if (val) {
+        el.classList.add('filled');
+        el.querySelector('b').textContent = k === 'when'
+          ? new Date(val).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+          : (k === 'phone' ? val.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3') : val);
+      }
+    }
+  }
+
+  async function startCall() {
+    const res = await fetch('/api/voice/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'web' }) });
+    const j = await res.json();
+    callId = j.callId;
+    addLine('agent', j.reply);
+    speak(j.reply);
+    setStatus('Listening — book something!', false);
+  }
+
+  async function send(text) {
+    if (!text || !callId || busy) return;
+    busy = true;
+    addLine('caller', text);
+    setStatus('The Voice is thinking…', false);
+    $('textInput').value = '';
+    try {
+      const res = await fetch('/api/voice/turn', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callId, text }) });
+      const j = await res.json();
+      if (j.ok) {
+        addLine('agent', j.reply);
+        speak(j.reply);
+        // re-pull slots from server not needed; approximate from reply flow via /calls
+        const calls = await fetch('/api/voice/calls').then(r => r.json()).catch(() => null);
+        // admin-only; ignore failures — slots update comes from turn response below
+      }
+    } catch (e) { setStatus('Connection hiccup — try again', false); }
+    busy = false;
+    setStatus(listening ? 'Listening…' : 'Tap the mic to keep talking', listening);
+  }
+
+  // simplified slot sync: parse from session via a light endpoint
+  window._voiceSyncSlots = async function () {
+    try {
+      const res = await fetch('/api/voice/session/' + callId);
+      if (res.ok) { const j = await res.json(); updateSlots(j.session.slots); if (j.session.done) $('endNote').classList.add('show'); }
+    } catch (e) {}
+  };
+
+  // ── mic: an open phone line ─────────────────────────────────────────
+  // Continuous listening: stays on until you tap it again, auto-restarts
+  // if the browser ends the session, pauses while the agent speaks (so it
+  // never hears itself), and explains exactly what happened if blocked.
+  let micSession = false;   // user wants the line open
+  let finalBuf = '';
+  let gotAnyAudio = false;
+  let submitTimer = null, restartTimer = null, watchdog = null;
+
+  function micHintDefault() { $('micHint').textContent = 'or type below — both work the same'; }
+  function micError(msg) {
+    $('micHint').innerHTML = '<span style="color:#ff6b6b">' + msg + '</span>';
+    setStatus('Mic problem — see the note below', false);
+  }
+  function updateMicVisual() {
+    $('micBtn').classList.toggle('listening', micSession);
+    $('wave').classList.toggle('live', listening);
+  }
+
+  function startRecognition() {
+    if (!SR || !micSession || listening) return;
+    if (TTS.state.speaking) {
+      // agent still talking — the caller tapped to talk: barge in, retry shortly
+      TTS.stop();
+      clearTimeout(restartTimer);
+      restartTimer = setTimeout(startRecognition, 250);
+      return;
+    }
+    clearTimeout(restartTimer);
+    recog = new SR();
+    recog.lang = 'en-US';
+    recog.interimResults = true;   // live text as you speak
+    recog.continuous = true;       // stay on between phrases
+    recog.onstart = () => {
+      listening = true;
+      gotAnyAudio = false;
+      clearTimeout(watchdog);
+      updateMicVisual();
+      setStatus('Line open — just talk naturally', true);
+    };
+    recog.onresult = (e) => {
+      gotAnyAudio = true;
+      let interim = '', final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      if (interim) $('micHint').textContent = '🎙 ' + interim + '…';
+      if (final) {
+        finalBuf += final + ' ';
+        $('micHint').textContent = '🎙 ' + finalBuf.trim();
+        scheduleSubmit();
+      }
+    };
+    recog.onerror = (e) => {
+      const err = e && e.error;
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        micSession = false; updateMicVisual();
+        micError('Mic blocked by the browser. Click the lock/🔒 icon in the address bar → Site settings → Microphone → Allow, then tap the mic again.');
+      } else if (err === 'audio-capture') {
+        micSession = false; updateMicVisual();
+        micError('No microphone detected. Plug one in (or unplug/replug USB mics), or just type below.');
+      } else if (err === 'network') {
+        micError('Speech service hiccup — reconnecting…');
+        // onend will auto-restart
+      }
+      // no-speech / aborted: normal, onend auto-restarts
+    };
+    recog.onend = () => {
+      listening = false;
+      updateMicVisual();
+      if (micSession) restartTimer = setTimeout(startRecognition, 300); // keep the line open
+      else setStatus('Mic off — tap to talk again', false);
+    };
+    try { recog.start(); } catch (e) { /* start called twice — ignore */ }
+  }
+
+  // end-of-utterance: submit ~0.8s after the last final result
+  function scheduleSubmit() {
+    clearTimeout(submitTimer);
+    submitTimer = setTimeout(async () => {
+      const text = finalBuf.trim();
+      finalBuf = '';
+      micHintDefault();
+      if (!text) return;
+      if (busy) { // agent still replying — retry shortly
+        setTimeout(() => { finalBuf = text; scheduleSubmit(); }, 600);
+        return;
+      }
+      TTS.stop(); // barge-in: agent always yields to the caller
+      await send(text);
+      syncSlots();
+    }, 800);
+  }
+
+  // while the agent speaks, pause the mic so it can't hear itself;
+  // resume when the reply finishes
+  TTS.onChange((s) => {
+    if (s.speaking && micSession && listening) { try { recog && recog.stop(); } catch (e) {} }
+    else if (!s.speaking && micSession && !listening) startRecognition();
+  });
+
+  $('micBtn').addEventListener('click', async () => {
+    if (!SR) {
+      micError('This browser has no speech recognition. Use Chrome or Edge — or type below, it works identically.');
+      return;
+    }
+    if (!micSession) {
+      // pre-check permission so blocked mics explain themselves instantly
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const p = await navigator.permissions.query({ name: 'microphone' });
+          if (p.state === 'denied') {
+            micError('Mic is blocked for this site. Click the lock/🔒 icon in the address bar → Site settings → Microphone → Allow, then tap the mic again.');
+            return;
+          }
+        }
+      } catch (e) { /* Safari/older browsers: rely on the onerror path */ }
+      // no-audio watchdog: some setups hang silently instead of erroring
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        if (micSession && !listening && !gotAnyAudio) {
+          micError('No audio reaching the agent yet. If a mic icon appeared in the address bar, approve it; check the right mic is selected (Windows Settings → Sound), then tap the mic again.');
+        }
+      }, 6000);
+    } else {
+      clearTimeout(watchdog);
+    }
+    micSession = !micSession;
+    if (micSession) {
+      TTS.stop();               // never compete with the greeting
+      $('micHint').textContent = '🎙 Line open — just talk. Tap the mic again to hang up.';
+      startRecognition();
+      updateMicVisual();
+    } else {
+      clearTimeout(restartTimer);
+      clearTimeout(submitTimer);
+      try { recog && recog.stop(); } catch (e) {}
+      updateMicVisual();
+      micHintDefault();
+      setStatus('Tap the mic to keep talking', false);
+    }
+  });
+
+  async function syncSlots() {
+    try {
+      const res = await fetch('/api/voice/session/' + callId);
+      if (res.ok) { const j = await res.json(); updateSlots(j.session.slots); if (j.session.done) $('endNote').classList.add('show'); }
+    } catch (e) {}
+  }
+
+  $('sendBtn').addEventListener('click', () => { send($('textInput').value.trim()); setTimeout(syncSlots, 600); });
+  $('textInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { send($('textInput').value.trim()); setTimeout(syncSlots, 600); } });
+
+  // ── Vapi pro line (optional upgrade — works when server env is set) ──
+  let vapi = null;
+  let vapiActive = false;
+  const vapiDot = $('vapiDot'), vapiLabel = $('vapiLabel'), vapiHint = $('vapiHint');
+  function vapiState(dot, label, showStart, showEnd) {
+    vapiDot.className = 'vb-dot' + (dot ? ' ' + dot : '');
+    vapiLabel.textContent = label;
+    $('vapiStart').style.display = showStart ? '' : 'none';
+    $('vapiEnd').style.display = showEnd ? '' : 'none';
+  }
+  fetch('/api/vapi/config').then(r => r.json()).then((cfg) => {
+    if (!cfg.configured) return; // stays gray with the hint
+    vapiHint.innerHTML = 'Pro line ready — calls run through Vapi (production STT, barge-in, optional phone number) while <b>this server\'s brain</b> does the booking. Costs Vapi credits per minute.';
+    vapiState('', 'Pro line: Vapi · ready', true, false);
+    $('vapiStart').addEventListener('click', async () => {
+      try {
+        vapiState('loading', 'Pro line: connecting…', false, false);
+        if (!window.vapiSDKClass) {
+          const mod = await import('https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/+esm');
+          window.vapiSDKClass = mod.default;
+        }
+        vapi = new window.vapiSDKClass(cfg.publicKey);
+        vapi.on('call-start', () => { vapiActive = true; addLine('agent', '— pro line connected —'); vapiState('kokoro', 'Pro line: LIVE', false, true); setStatus('Pro line live — just talk', true); });
+        vapi.on('call-end', () => { vapiActive = false; vapiState('', 'Pro line: ended', true, false); setStatus('Call ended', false); });
+        vapi.on('error', (e) => { vapiActive = false; vapiState('sys', 'Pro line: error', true, false); addLine('agent', '⚠️ ' + (e.message || e)); });
+        vapi.on('message', (m) => {
+          if (m.type === 'transcript' && m.transcriptType === 'final') {
+            addLine(m.role === 'assistant' ? 'agent' : 'caller', m.transcript);
+            if (m.role === 'user') syncSlots();
+          }
+        });
+        await vapi.start(cfg.assistantId);
+      } catch (e) {
+        vapiState('sys', 'Pro line: failed', true, false);
+        addLine('agent', '⚠️ Vapi failed: ' + (e.message || e));
+      }
+    });
+    $('vapiEnd').addEventListener('click', () => { try { vapi && vapi.stop(); } catch (e) {} });
+  }).catch(() => {});
+
+  startCall();
+})();
+</script>
+</body>
+</html>

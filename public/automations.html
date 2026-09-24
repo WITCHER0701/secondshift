@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Crew — SecondShift</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="description" content="Four AI workers for your business: review automation, AI voice agent, content engine, lead responder. Live pricing, live test drives. Built by Rishi Raj Singh.">
+<link rel="stylesheet" href="/styles.css">
+  <meta property="og:title" content="SecondShift — business automations that work after close">
+  <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
+  <meta property="og:image" content="/logo.png">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <img src="/logo.png" alt="SecondShift" style="height:20px;width:auto;display:block">
+    </a>
+    <div class="nav-links">
+      <a href="/index.html">Home</a>
+      <a href="/test-drive.html">Test Drive</a>
+      <a href="/process.html">Process</a>
+      <a href="/deal.html" class="nav-cta">Make a Deal</a>
+    </div>
+  </div>
+</nav>
+
+<header class="page-hero">
+  <div class="hero-glow" style="position:absolute;inset:0" data-parallax="0.18"></div>
+  <div class="page-hero-inner">
+    <span class="eyebrow">The Crew</span>
+    <h1>Four workers. <span class="text-gradient">Live pricing.</span><br>Watch them work.</h1>
+    <p class="lead" style="max-width:600px;margin-top:20px">Each system below is installed, running and testable right now — the exact build you'd get from Rishi Raj Singh. The price you see is the price you pay. Per location, per month, no setup fee on annual deals.</p>
+  </div>
+</header>
+
+<section class="section" style="padding-top:20px">
+  <div class="auto-grid" id="catalogGrid" style="grid-template-columns:1fr"><!-- full-width cards --></div>
+</section>
+
+<!-- comparison band -->
+<section class="section" style="padding-top:0">
+  <div class="section-head reveal">
+    <span class="eyebrow">The math</span>
+    <h2>What one shift replaces</h2>
+  </div>
+  <div class="trio">
+    <div class="info-card reveal tilt">
+      <div class="ic">💸</div>
+      <h3>One hire: $3,500+/mo</h3>
+      <p>A part-time admin doing reviews, calls and follow-ups — with sick days, turnover and training.</p>
+    </div>
+    <div class="info-card reveal reveal-d1 tilt">
+      <div class="ic">🏢</div>
+      <h3>One agency: $2-5k/mo</h3>
+      <p>Slow decks, account managers, 6-week timelines — and you still do the actual work.</p>
+    </div>
+    <div class="info-card reveal reveal-d2 tilt">
+      <div class="ic">🌙</div>
+      <h3>SecondShift: $499-1,200</h3>
+      <p>Works 24/7, never quits, measured by the dashboard. Built by one engineer, live in days.</p>
+    </div>
+  </div>
+</section>
+
+<!-- owner strip -->
+<section class="section" style="padding-top:0">
+  <div class="info-card reveal" style="max-width:760px;margin:0 auto;padding:36px;display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+    <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#2997ff,#6db6ff);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:#001022;flex-shrink:0">RR</div>
+    <div style="flex:1;min-width:240px">
+      <h3 style="font-size:1.2rem">Built by Rishi Raj Singh</h3>
+      <p style="color:var(--text-2);font-size:14.5px;margin-top:6px">One engineer, every system. When something needs changing, you talk to the person who can change it — today.</p>
+    </div>
+  </div>
+</section>
+
+<section style="position:relative;overflow:hidden;padding:120px 0">
+  <div class="hero-glow" style="position:absolute;inset:0" data-parallax="0.2"></div>
+  <div class="section" style="text-align:center;position:relative;padding:40px 22px">
+    <h2 class="reveal" style="margin-bottom:30px">Test anything. <span class="text-gradient">Hire what converts.</span></h2>
+    <a href="/test-drive.html" class="btn btn-primary reveal">Start a test drive</a>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div style="max-width:300px">
+      <div class="nav-logo" style="margin-bottom:12px">
+        <img src="/logo.png" alt="SecondShift" style="height:22px;width:auto;display:block">
+      </div>
+      <p class="dim" style="font-size:13px">Watch the shift work. Then hire it.</p>
+    </div>
+    <div>
+      <h5>Explore</h5>
+      <a href="/index.html">Home</a>
+      <a href="/test-drive.html">Test drive</a>
+      <a href="/process.html">Process</a>
+    </div>
+    <div>
+      <h5>Business</h5>
+      <a href="/deal.html">Hire the shift</a>
+      <a href="/admin.html">Owner login</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2026 SecondShift · Built and operated by Rishi Raj Singh</div>
+</footer>
+
+<script src="/script.js"></script>
+<script src="/scroll.js"></script>
+<script>
+fetch('/api/automations').then(r => r.json()).then(({ automations }) => {
+  const grid = document.getElementById('catalogGrid');
+  grid.innerHTML = automations.map(a => `
+    <article class="auto-card reveal reveal-scale tilt" style="padding:40px">
+      <div class="glow" style="background:radial-gradient(circle, ${a.accent}, transparent 70%)"></div>
+      <div class="auto-card-top">
+        <div class="auto-icon" style="width:64px;height:64px;font-size:31px">${a.icon}</div>
+        <div class="auto-price"><div class="p" style="font-size:1.5rem">${a.priceLabel}</div><div class="per">per location / mo</div></div>
+      </div>
+      <h3 style="font-size:1.9rem">${a.name}</h3>
+      <p class="tagline" style="font-size:17px">${a.tagline}</p>
+      <p class="outcome" style="font-size:14.5px">${a.outcome}</p>
+      <p class="meta">For: ${a.sellTo}</p>
+      <ul style="list-style:none;display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:18px 0 26px">
+        ${a.bullets.map(b => `<li style="font-size:13.5px;color:var(--text-2);display:flex;gap:8px"><span style="color:${a.accent}">✓</span>${b}</li>`).join('')}
+      </ul>
+      <div class="auto-card-actions" style="max-width:420px">
+        <a class="btn btn-primary btn-sm" href="/test-drive.html?auto=${a.slug}">▶ Test drive it</a>
+        ${a.slug === 'voice-agent' ? '<a class="btn btn-ghost btn-sm" href="/voice.html" style="border-color:#4ade80;color:#4ade80">🎤 Call it live</a>' : `<a class="btn btn-ghost btn-sm" href="/deal.html?auto=${a.slug}">Make a deal</a>`}
+      </div>
+    </article>
+  `).join('');
+  if (window.LabReveal) window.LabReveal.observeAll(grid);
+});
+</script>
+</body>
+</html>

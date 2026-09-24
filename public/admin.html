@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leads — SecondShift Admin</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 22px; }
+  .login-card { width: 100%; max-width: 400px; background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 40px; }
+  .dash { max-width: 1180px; margin: 0 auto; padding: calc(var(--nav-h) + 34px) 22px 80px; }
+  .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin: 24px 0; }
+  .kpi { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 18px; }
+  .kpi .v { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; }
+  .kpi .l { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
+  .panel { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; margin-bottom: 22px; }
+  .lead-row-actions select { background: var(--bg-card); border: 1px solid var(--line-strong); color: var(--text); border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+  .notes-btn { background: none; border: 1px solid var(--line-strong); color: var(--text-2); border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .notes-btn:hover { color: var(--text); border-color: var(--accent); }
+  .slugs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .slug-chip { background: rgba(41,151,255,.12); color: #7cc0ff; border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600; }
+  .feed-item { padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.04); font-size: 13px; color: var(--text-2); display: flex; justify-content: space-between; gap: 10px; }
+  .feed-item:last-child { border-bottom: 0; }
+  .feed-item b { color: var(--text); font-weight: 600; }
+  @media (max-width: 960px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+  .tabbar { display: flex; gap: 8px; }
+  .tabbar button { border: 1.5px solid var(--line-strong); background: var(--bg-card); padding: 9px 18px; border-radius: 99px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text-2); transition: all .25s; }
+  .tabbar button.on { border-color: var(--accent); color: var(--accent); background: rgba(41,151,255,.08); }
+</style>
+  <meta property="og:title" content="SecondShift — business automations that work after close">
+  <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
+  <meta property="og:image" content="/logo.png">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <img src="/logo.png" alt="SecondShift" style="height:20px;width:auto;display:block"> <span class="dim" style="font-weight:400;font-size:12px">· admin</span>
+    </a>
+    <div class="nav-links" id="navRight">
+      <a href="/">← Site</a>
+    </div>
+  </div>
+</nav>
+
+<!-- LOGIN -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-card">
+    <span class="eyebrow">Owner Access</span>
+    <h2 style="font-size:1.6rem;margin-bottom:6px">Leads dashboard</h2>
+    <p class="muted" style="font-size:13.5px;margin-bottom:22px">Rishi's pipeline — every deal brief and test-drive event, in one place.</p>
+    <form id="loginForm">
+      <div class="field"><label for="adminPass">Password</label><input id="adminPass" type="password" placeholder="••••••••••••" autocomplete="current-password"></div>
+      <button class="btn btn-primary btn-block" type="submit">Unlock</button>
+      <div class="form-error" id="loginError"></div>
+    </form>
+    <p class="dim" style="font-size:12px;margin-top:16px;text-align:center">Default password: <code>lab-admin-2026</code> — change via ADMIN_PASSWORD env.</p>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div class="dash" id="dash" style="display:none">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+    <div>
+      <span class="eyebrow" style="margin-bottom:6px">Rishi's desk</span>
+      <h1 style="font-size:1.9rem">SecondShift HQ</h1>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="logoutBtn">Log out</button>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="v" id="kMrr" style="color:#4ade80">$0</div><div class="l">Monthly recurring</div></div>
+    <div class="kpi"><div class="v" id="kClients">0</div><div class="l">Active clients</div></div>
+    <div class="kpi"><div class="v" id="kDue">$0</div><div class="l">Invoices due</div></div>
+    <div class="kpi"><div class="v" id="kCollected">$0</div><div class="l">Collected</div></div>
+    <div class="kpi"><div class="v" id="kOpen">0</div><div class="l">Open deals</div></div>
+  </div>
+
+  <div id="cloudBar" class="dim" style="display:flex;align-items:center;gap:10px;font-size:12.5px;margin:-8px 0 16px;flex-wrap:wrap">
+    <span id="cloudDot" style="width:8px;height:8px;border-radius:50%;background:#8e8e93;display:inline-block"></span>
+    <span id="cloudText">checking cloud…</span>
+    <button class="btn btn-ghost btn-sm" id="cloudPushBtn" style="padding:3px 10px;font-size:11.5px;display:none">Push now</button>
+    <button class="btn btn-ghost btn-sm" id="cloudPullBtn" style="padding:3px 10px;font-size:11.5px;display:none">Pull now</button>
+  </div>
+
+  <div class="tabbar" style="margin:6px 0 18px">
+    <button data-tab="pipeline" class="on">Pipeline</button>
+    <button data-tab="clients">Clients & Billing</button>
+    <button data-tab="voice">Voice Ops</button>
+  </div>
+
+  <!-- PIPELINE TAB -->
+  <div id="tab-pipeline">
+  <div style="display:grid;grid-template-columns:1.8fr 1fr;gap:22px;align-items:start">
+    <div class="panel">
+      <h3 style="margin-bottom:16px">Deal briefs</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Who</th><th>Wants</th><th>Budget</th><th>Timeline</th><th>Status</th><th></th></tr></thead>
+          <tbody id="leadRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h3 style="margin-bottom:12px">Live event feed</h3>
+        <div id="eventFeed"></div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- VOICE OPS TAB -->
+  <div id="tab-voice" style="display:none">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start">
+      <div class="panel">
+        <h3 style="margin-bottom:14px">Recent calls <a href="/voice.html" style="font-size:12px;font-weight:400;float:right">try it live →</a></h3>
+        <div id="callList" style="display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:14px">Booked appointments</h3>
+        <div id="apptList" style="display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:14px">First Response — qualified leads <a href="/test-drive.html?auto=lead-responder" style="font-size:12px;font-weight:400;float:right">test it →</a></h3>
+        <div id="leadThreadList" style="display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:14px">Content Crew — generated weeks <a href="/test-drive.html?auto=content-engine" style="font-size:12px;font-weight:400;float:right">test it →</a></h3>
+        <div id="contentList" style="display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLIENTS & BILLING TAB -->
+  <div id="tab-clients" style="display:none">
+    <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:22px;align-items:start">
+      <div class="panel">
+        <h3 style="margin-bottom:16px">Clients</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Client</th><th>Workers</th><th>Cycle</th><th>MRR</th><th>Status</th><th></th></tr></thead>
+            <tbody id="clientRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="panel">
+          <h3 style="margin-bottom:14px">Onboard a client</h3>
+          <form id="clientForm">
+            <div class="field"><label>Name</label><input id="cName" placeholder="Maria Gonzalez"></div>
+            <div class="field"><label>Company *</label><input id="cCompany" placeholder="Sunny Motors"></div>
+            <div class="field"><label>Email</label><input id="cEmail" type="email" placeholder="maria@shop.com"></div>
+            <div class="field"><label>Workers *</label><div id="cSlugs" style="display:flex;flex-direction:column;gap:8px"></div></div>
+            <div class="field"><label>Billing cycle</label>
+              <select id="cCycle"><option value="monthly">Monthly (full price)</option><option value="quarterly">Quarterly (10% off, billed every 3 months)</option></select>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit">Onboard & generate first invoice</button>
+            <div class="form-error" id="clientError"></div>
+          </form>
+        </div>
+        <div class="panel">
+          <h3 style="margin-bottom:14px">Invoices</h3>
+          <div id="invoiceList" style="display:flex;flex-direction:column;gap:10px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/script.js"></script>
+<script src="/scroll.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = window.LabUtil.esc;
+  const ago = window.LabUtil.timeAgo;
+
+  async function check() {
+    const r = await fetch('/admin/api/stats');
+    if (r.ok) { showDash(); return; }
+    $('loginWrap').style.display = 'flex';
+    $('dash').style.display = 'none';
+  }
+
+  function showDash() {
+    $('loginWrap').style.display = 'none';
+    $('dash').style.display = 'block';
+    load();
+    clearInterval(window._poll);
+    window._poll = setInterval(load, 12000);
+  }
+
+  async function load() {
+    const [stats, leads, events, clients, invoices, calls, appts, lthreads, contents] = await Promise.all([
+      fetch('/admin/api/stats').then(r => (r.ok ? r.json() : {})),
+      fetch('/admin/api/leads').then(r => (r.ok ? r.json() : { leads: [] })),
+      fetch('/admin/api/events').then(r => (r.ok ? r.json() : { events: [] })),
+      fetch('/admin/api/clients').then(r => (r.ok ? r.json() : { clients: [] })).catch(() => ({ clients: [] })),
+      fetch('/admin/api/invoices').then(r => (r.ok ? r.json() : { invoices: [] })).catch(() => ({ invoices: [] })),
+      fetch('/api/voice/calls').then(r => (r.ok ? r.json() : { calls: [] })).catch(() => ({ calls: [] })),
+      fetch('/api/voice/appointments').then(r => (r.ok ? r.json() : { appointments: [] })).catch(() => ({ appointments: [] })),
+      fetch('/api/leads/threads').then(r => (r.ok ? r.json() : { leads: [] })).catch(() => ({ leads: [] })),
+      fetch('/api/content/recent').then(r => (r.ok ? r.json() : { contents: [] })).catch(() => ({ contents: [] })),
+    ]);
+    renderCalls(calls.calls || []);
+    renderAppts(appts.appointments || []);
+    renderLeadThreads(lthreads.leads || []);
+    renderContents(contents.contents || []);
+    $('kMrr').textContent = '$' + (stats.mrr || 0).toLocaleString();
+    $('kClients').textContent = stats.activeClients || 0;
+    $('kDue').textContent = '$' + (stats.dueTotal || 0).toLocaleString();
+    $('kCollected').textContent = '$' + (stats.collected || 0).toLocaleString();
+    $('kOpen').textContent = stats.openDeals;
+
+    const order = ['new', 'contacted', 'demo_booked', 'won', 'lost'];
+    $('leadRows').innerHTML = leads.leads.map(l => `
+      <tr>
+        <td><b>${esc(l.name)}</b><br><span class="dim" style="font-size:12px">${esc(l.company)} · ${esc(l.email)}</span><br><span class="dim" style="font-size:11px">${esc(l.industry || '')} · ${ago(l.createdAt)}</span>${l.message ? `<br><span class="dim" style="font-size:12px;display:block;max-width:320px;margin-top:5px">"${esc(l.message.slice(0, 140))}${l.message.length > 140 ? '…' : ''}"</span>` : ''}</td>
+        <td><div class="slugs">${(l.automationSlugs || []).map(s => `<span class="slug-chip">${esc(s)}</span>`).join('')}</div></td>
+        <td>${esc(l.monthlyBudget || '—')}</td>
+        <td>${esc(l.timeline || '—')}</td>
+        <td><span class="chip ${esc(l.status)}">${esc(l.status.replace('_', ' '))}</span></td>
+        <td>
+          <div class="lead-row-actions" style="display:flex;gap:6px;align-items:center">
+            <select data-id="${l.id}" class="statusSel">
+              ${order.map(s => `<option value="${s}" ${l.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}
+            </select>
+            <button class="notes-btn" data-id="${l.id}" data-email="${esc(l.email)}" title="Copy email">📧</button>
+          </div>
+        </td>
+      </tr>
+    `).join('') || '<tr><td colspan="6" class="dim">No deal briefs yet. They land here the moment a business submits one.</td></tr>';
+
+    document.querySelectorAll('.statusSel').forEach(sel => sel.addEventListener('change', async () => {
+      await fetch('/admin/api/leads/' + sel.dataset.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: sel.value }) });
+      load();
+    }));
+    document.querySelectorAll('.notes-btn').forEach(b => b.addEventListener('click', () => {
+      navigator.clipboard.writeText(b.dataset.email);
+      b.textContent = '✓';
+      setTimeout(() => b.textContent = '📧', 1200);
+    }));
+
+    const icons = { testdrive_started: '🧪', testdrive_step: '⚙️', testdrive_completed: '✅', demo_view: '👀', deal_requested: '🤝', client_onboarded: '🎉', invoice_created: '🧾', invoice_paid: '💰', client_updated: '⚙️', call_started: '📞', appointment_booked: '📅', lead_responded: '⚡', lead_qualified: '🎯', content_generated: '🎨' };
+    $('eventFeed').innerHTML = events.events.slice(0, 24).map(e => `
+      <div class="feed-item">
+        <span>${icons[e.type] || '•'} <b>${esc(e.type.replace(/_/g, ' '))}</b> ${e.meta && e.meta.slug ? '· ' + esc(e.meta.slug) : ''}${e.meta && e.meta.total ? ' · $' + e.meta.total : ''}</span>
+        <span class="dim" style="font-size:11px;white-space:nowrap">${ago(e.createdAt)}</span>
+      </div>
+    `).join('') || '<div class="dim">No events yet.</div>';
+
+    renderClients(clients.clients || []);
+    renderInvoices(invoices.invoices || []);
+  }
+
+  function renderCalls(calls) {
+    $('callList').innerHTML = calls.slice(0, 20).map(c => {
+      const dur = Math.max(1, Math.round((new Date(c.updatedAt) - new Date(c.startedAt)) / 1000));
+      const last = c.transcript && c.transcript.length ? c.transcript[c.transcript.length - 1].text : '';
+      return `<div style="background:var(--bg-raise);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          <b>${esc(c.slots && c.slots.name || 'Unknown caller')}</b>
+          <span class="dim" style="font-size:11px">${ago(c.startedAt)} · ${dur}s · ${c.done ? '✅ booked' : c.state}</span>
+        </div>
+        <div class="dim" style="font-size:12.5px">"${esc(last.slice(0, 110))}${last.length > 110 ? '…' : ''}"</div>
+        ${c.slots && c.slots.service ? `<div style="margin-top:6px"><span class="slug-chip">${esc(c.slots.service)}</span>${c.slots.when ? ` <span class="slug-chip">${new Date(c.slots.when).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</span>` : ''}</div>` : ''}
+      </div>`;
+    }).join('') || '<div class="dim">No calls yet. Try <a href="/voice.html">the live line</a>.</div>';
+  }
+
+  function renderAppts(appts) {
+    $('apptList').innerHTML = appts.map(a => `
+      <div style="background:var(--bg-raise);border:1px solid rgba(48,209,88,.3);border-radius:10px;padding:12px 14px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <b>${esc(a.service)}</b><span class="chip won">${esc(a.status)}</span>
+        </div>
+        <div class="dim" style="font-size:12.5px;margin-top:3px">${esc(a.name)} · ${esc(String(a.phone).replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3'))}</div>
+        <div style="margin-top:4px">📅 <b>${new Date(a.when).toLocaleString([], {weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'})}</b></div>
+      </div>
+    `).join('') || '<div class="dim">No appointments yet.</div>';
+  }
+
+  function renderLeadThreads(threads) {
+    $('leadThreadList').innerHTML = threads.slice(0, 12).map(t => {
+      const sc = t.score || {};
+      const cls = (sc.score || 0) >= 60 ? 'won' : (sc.score || 0) >= 30 ? 'demo_booked' : 'contacted';
+      return `<div style="background:var(--bg-raise);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          <b>${esc(t.slots && t.slots.name || 'Anonymous lead')}</b>
+          <span class="chip ${cls}">${sc.temp || '—'} ${sc.score != null ? sc.score + '/100' : ''}</span>
+        </div>
+        <div class="dim" style="font-size:12.5px">${esc(t.slots && t.slots.project || '—')} · ${esc(t.slots && t.slots.timeline || '—')} · ${typeof (t.slots || {}).budget === 'number' ? '$' + t.slots.budget.toLocaleString() : esc((t.slots || {}).budget || '—')}</div>
+        <div class="dim" style="font-size:11.5px;margin-top:3px">${esc(t.slots && (t.slots.email || t.slots.phone) || '')} · replied in ${t.replySeconds || '?'}s · ${ago(t.createdAt)}</div>
+      </div>`;
+    }).join('') || '<div class="dim">No qualified leads yet. <a href="/test-drive.html?auto=lead-responder">Run one</a>.</div>';
+  }
+
+  function renderContents(gens) {
+    $('contentList').innerHTML = gens.slice(0, 12).map(g => {
+      return `
+      <div style="background:var(--bg-raise);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          <b>${esc(g.business)}</b><span class="slug-chip">${esc(g.vibe)}</span>
+        </div>
+        <div class="dim" style="font-size:12.5px">7 posts about "${esc(g.subject)}" · ${esc(g.city)}</div>
+        <div style="font-size:12px;margin-top:5px;padding:8px 10px;background:var(--bg);border-radius:8px;border:1px solid var(--line)">${esc((g.posts[0] || {}).caption || '').slice(0, 110)}…</div>
+        <div class="dim" style="font-size:11px;margin-top:4px">${ago(g.createdAt)}</div>
+      </div>`;
+    }).join('') || '<div class="dim">Nothing generated yet. <a href="/test-drive.html?auto=content-engine">Make a week</a>.</div>';
+  }
+
+  let CATALOG = [];
+  fetch('/api/automations').then(r => r.json()).then(({ automations }) => {
+    CATALOG = automations;
+    $('cSlugs').innerHTML = automations.map(a => `
+      <label class="pick" data-slug="${a.slug}" style="padding:9px 12px">
+        <span class="pi">${a.icon}</span>
+        <span style="flex:1"><b style="font-size:13px">${a.name}</b><span style="font-size:11.5px">${a.priceLabel}</span></span>
+        <input type="checkbox" value="${a.slug}">
+      </label>
+    `).join('');
+    $('cSlugs').querySelectorAll('.pick').forEach(p => p.addEventListener('click', (e) => {
+      e.preventDefault();
+      p.classList.toggle('on');
+      p.querySelector('input').checked = p.classList.contains('on');
+    }));
+  });
+
+  function renderClients(clients) {
+    $('clientRows').innerHTML = clients.map(c => {
+      const mrr = c.slugs.reduce((s, slug) => s + ((CATALOG.find(a => a.slug === slug) || {}).price || 0) * (c.cycle === 'quarterly' ? 0.9 : 1), 0);
+      return `
+      <tr>
+        <td><b>${esc(c.name || c.company)}</b><br><span class="dim" style="font-size:12px">${esc(c.company)}${c.email ? ' · ' + esc(c.email) : ''}</span><br><span class="dim" style="font-size:11px">since ${new Date(c.startedAt).toLocaleDateString()}</span></td>
+        <td><div class="slugs">${c.slugs.map(s => `<span class="slug-chip">${esc((CATALOG.find(a => a.slug === s) || {}).name || s)}</span>`).join('')}</div></td>
+        <td>${c.cycle}</td>
+        <td><b>$${Math.round(mrr).toLocaleString()}</b></td>
+        <td><span class="chip ${c.status === 'active' ? 'won' : 'lost'}">${esc(c.status)}</span></td>
+        <td>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="notes-btn genInv" data-id="${c.id}" title="Generate next invoice">🧾 Bill</button>
+            <select class="cliStatus" data-id="${c.id}" style="background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:8px;padding:5px 8px;font-size:12px">
+              ${['active','paused','cancelled'].map(s => `<option ${c.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </div>
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="dim">No clients yet. Convert a won deal →</td></tr>';
+
+    document.querySelectorAll('.cliStatus').forEach(sel => sel.addEventListener('change', async () => {
+      await fetch('/admin/api/clients/' + sel.dataset.id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: sel.value }) });
+      load();
+    }));
+    document.querySelectorAll('.genInv').forEach(b => b.addEventListener('click', async () => {
+      const res = await fetch('/admin/api/clients/' + b.dataset.id + '/invoice', { method: 'POST' });
+      const j = await res.json();
+      if (!res.ok) alert(j.error || 'Failed');
+      load();
+    }));
+  }
+
+  function renderInvoices(invoices) {
+    $('invoiceList').innerHTML = invoices.slice(0, 12).map(i => `
+      <div style="background:var(--bg-raise);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="font-size:13px">
+          <b>${esc(i.company)}</b> · <span class="dim">$${i.total.toLocaleString()} ${i.cycle}</span><br>
+          <span class="dim" style="font-size:11.5px">${i.lines.map(l => esc(l.name)).join(' + ')} · due ${new Date(i.dueAt).toLocaleDateString()}</span>
+        </div>
+        ${i.status === 'paid'
+          ? '<span class="chip won">paid</span>'
+          : `<button class="notes-btn markPaid" data-id="${i.id}" style="border-color:#4ade80;color:#4ade80">Mark paid</button>`}
+      </div>
+    `).join('') || '<div class="dim">No invoices yet.</div>';
+
+    document.querySelectorAll('.markPaid').forEach(b => b.addEventListener('click', async () => {
+      await fetch('/admin/api/invoices/' + b.dataset.id + '/pay', { method: 'POST' });
+      load();
+    }));
+  }
+
+  // tabs
+  document.querySelectorAll('.tabbar button').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabbar button').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    ['pipeline', 'clients', 'voice'].forEach(t => { const el = $('tab-' + t); if (el) el.style.display = btn.dataset.tab === t ? 'block' : 'none'; });
+  }));
+
+  // onboard client form
+  $('clientForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('clientError').classList.remove('show');
+    const slugs = [...document.querySelectorAll('#cSlugs .pick.on input')].map(i => i.value);
+    const res = await fetch('/admin/api/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      name: $('cName').value, company: $('cCompany').value, email: $('cEmail').value,
+      slugs, cycle: $('cCycle').value,
+    })});
+    const j = await res.json();
+    if (!res.ok) { $('clientError').textContent = j.error || 'Failed'; $('clientError').classList.add('show'); return; }
+    $('cName').value = ''; $('cCompany').value = ''; $('cEmail').value = '';
+    document.querySelectorAll('#cSlugs .pick.on').forEach(p => { p.classList.remove('on'); p.querySelector('input').checked = false; });
+    load();
+  });
+
+  $('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('loginError').classList.remove('show');
+    const res = await fetch('/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('adminPass').value }) });
+    if (res.ok) showDash();
+    else { $('loginError').textContent = 'Wrong password.'; $('loginError').classList.add('show'); }
+  });
+
+  $('logoutBtn').addEventListener('click', async () => { await fetch('/admin/logout', { method: 'POST' }); location.reload(); });
+
+  // cloud sync bar
+  async function loadCloud() {
+    try {
+      const cs = await fetch('/admin/api/cloud').then(r => r.json());
+      const dot = $('cloudDot'), txt = $('cloudText');
+      if (!cs.enabled) {
+        dot.style.background = '#8e8e93';
+        txt.innerHTML = 'Data stored locally only. To sync to the cloud for free, see <a href="/CLOUD-SETUP.md" style="color:#2997ff">CLOUD-SETUP.md</a> (2-minute setup).';
+      } else {
+        dot.style.background = cs.lastError ? '#ff453a' : '#30d158';
+        txt.innerHTML = `<b>${cs.provider}</b> cloud sync on · ${cs.pushes || 0} pushes · last ${cs.lastPushAt ? new Date(cs.lastPushAt).toLocaleTimeString() : '—'}${cs.lastError ? ' · <span style="color:#ff453a">' + cs.lastError.slice(0, 80) + '</span>' : ''}`;
+        $('cloudPushBtn').style.display = '';
+        $('cloudPullBtn').style.display = '';
+      }
+    } catch (_) { /* ignore */ }
+  }
+  $('cloudPushBtn').addEventListener('click', async () => {
+    const r = await fetch('/admin/api/cloud/push', { method: 'POST' });
+    const j = await r.json();
+    $('cloudText').innerHTML = r.ok ? '☁️ pushed to cloud ✓' : '<span style="color:#ff453a">push failed: ' + (j.error || '') + '</span>';
+    setTimeout(loadCloud, 2500);
+  });
+  $('cloudPullBtn').addEventListener('click', async () => {
+    const r = await fetch('/admin/api/cloud/pull', { method: 'POST' });
+    const j = await r.json();
+    $('cloudText').textContent = (j.restored ? '☁️ restored from cloud ✓ (server restart recommended)' : '☁️ ' + (j.reason || 'already up to date'));
+    setTimeout(loadCloud, 3500);
+  });
+  loadCloud();
+
+  check();
+})();
+</script>
+</body>
+</html>

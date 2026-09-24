@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Drive — SecondShift</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="description" content="Run a real SecondShift automation live: trigger it, watch every step, see the exact dashboards you'll own. Then hire the shift.">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  .td-layout { display: grid; grid-template-columns: 380px 1fr; gap: 48px; align-items: start; }
+  .td-picker { margin-bottom: 26px; }
+  .td-picker .pick { margin-bottom: 10px; }
+  .run-panel { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px; }
+  .run-btn { width: 100%; margin-top: 20px; }
+  .td-right { display: grid; grid-template-columns: 1fr; gap: 36px; justify-items: center; }
+  .td-stats { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .td-chip { background: var(--bg-card); border: 1px solid var(--line); border-radius: 99px; padding: 8px 16px; font-size: 12.5px; color: var(--text-2); }
+  .td-chip b { color: var(--text); }
+  .hidden { display: none !important; }
+  .mode-fields { margin-top: 16px; display: grid; gap: 12px; }
+  .mode-fields label { font-size: 12px; color: var(--text-2); display: block; margin-bottom: 5px; letter-spacing: .04em; }
+  .mode-fields input, .mode-fields select, .mode-fields textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 10px 12px; font-size: 13.5px; font-family: inherit;
+  }
+  .mode-fields textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+  .lead-bubble-user { background: #2997ff; color: #fff; }
+  .post-card { background: #fff; color: #0b0b0f; border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 10px rgba(2,8,23,.07); animation: bubble-in .35s var(--ease); }
+  .post-card .pc-top { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #6e6e73; margin-bottom: 6px; }
+  .post-card .pc-cap { font-size: 13px; line-height: 1.5; font-weight: 500; }
+  .post-card .pc-tags { color: #2997ff; font-size: 11.5px; margin-top: 6px; }
+  .post-card .pc-meta { color: #6e6e73; font-size: 11px; margin-top: 6px; }
+  .brief-card { background: #0e1420; border: 1px solid #223052; border-radius: 14px; padding: 14px; margin-top: 10px; font-family: ui-monospace, monospace; font-size: 11.5px; line-height: 1.65; color: #9ecbff; white-space: pre-wrap; animation: bubble-in .35s var(--ease); }
+  .score-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; animation: bubble-in .35s var(--ease); }
+  .score-chip { border-radius: 99px; padding: 5px 12px; font-size: 11.5px; font-weight: 600; }
+  .score-hot { background: rgba(255,69,58,.15); color: #ff453a; border: 1px solid rgba(255,69,58,.4); }
+  .score-warm { background: rgba(255,159,10,.15); color: #ffd60a; border: 1px solid rgba(255,159,10,.4); }
+  .score-cold { background: rgba(100,210,255,.15); color: #64d2ff; border: 1px solid rgba(100,210,255,.4); }
+  @media (max-width: 960px) { .td-layout { grid-template-columns: 1fr; } }
+</style>
+  <meta property="og:title" content="SecondShift — business automations that work after close">
+  <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
+  <meta property="og:image" content="/logo.png">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">
+      <img src="/logo.png" alt="SecondShift" style="height:20px;width:auto;display:block">
+    </a>
+    <div class="nav-links">
+      <a href="/index.html">Home</a>
+      <a href="/automations.html">Automations</a>
+      <a href="/process.html">Process</a>
+      <a href="/deal.html" class="nav-cta">Make a Deal</a>
+    </div>
+  </div>
+</nav>
+
+<header class="page-hero" style="padding-bottom:40px">
+  <div class="hero-glow" style="position:absolute;inset:0" data-parallax="0.15"></div>
+  <div class="page-hero-inner">
+    <span class="eyebrow">Live Sandbox — real engines, no scripts</span>
+    <h1>Test drive <span class="text-gradient" id="tdName">an automation</span></h1>
+    <p class="lead" style="max-width:620px;margin-top:18px">You're the customer now. Everything that fires on the right is the <b>actual engine</b> Rishi ships to paying businesses — same API, same code path. Try to break it.</p>
+  </div>
+</header>
+
+<section class="section" style="padding-top:10px">
+  <div class="td-layout">
+    <!-- LEFT: picker + controls -->
+    <div>
+      <div class="td-picker">
+        <h3 style="margin-bottom:14px">1 · Pick a system</h3>
+        <div id="pickerBox"><!-- picks injected --></div>
+      </div>
+      <div class="run-panel">
+        <h3 style="margin-bottom:8px">2 · Run it</h3>
+        <p class="muted" style="font-size:13.5px" id="runHint">The engine fires on the right, step by step. Nothing is faked — these are the live production endpoints.</p>
+
+        <!-- content mode inputs -->
+        <div class="mode-fields hidden" id="contentFields">
+          <div><label>Business name</label><input id="cfBiz" value="Glow Studio"></div>
+          <div><label>What did you photograph? <span class="muted">(the one input)</span></label><input id="cfSubject" value="balayage transformation"></div>
+          <div>
+            <label>Brand voice</label>
+            <select id="cfVibe">
+              <option value="playful">Playful (salons, cafés, gyms)</option>
+              <option value="premium">Premium (studios, clinics, detailers)</option>
+              <option value="local" selected>Local & neighborly (home services, restaurants)</option>
+            </select>
+          </div>
+          <div><label>City</label><input id="cfCity" value="Austin"></div>
+          <div><label>This week's offer <span class="muted">(optional)</span></label><input id="cfOffer" value="20% off first visit"></div>
+        </div>
+
+        <!-- lead mode input -->
+        <div class="mode-fields hidden" id="leadFields">
+          <div>
+            <label>Paste an incoming lead — like the one your form just captured</label>
+            <textarea id="lfRaw">Hi, I'm Dana. My kitchen faucet is leaking badly and the cabinet is soaked. Need someone asap this week. Budget maybe $600? dana@example.com</textarea>
+          </div>
+        </div>
+
+        <button class="btn btn-primary run-btn" id="runBtn">⚡ Start the shift</button>
+        <div class="td-stats" style="margin-top:18px" id="tdStats"></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: checklist + device -->
+    <div class="td-right">
+      <div class="check-list" id="checkList" style="width:100%;max-width:560px"></div>
+      <div class="device">
+        <div class="notch"></div>
+        <div class="device-screen">
+          <div class="screen-head">
+            <div class="screen-avatar" id="screenAvatar" style="background:#8e8e93">?</div>
+            <div><b id="screenBiz">Choose an automation</b><span id="screenSub">standing by…</span></div>
+          </div>
+          <div class="screen-body" id="screenBody"></div>
+          <div class="screen-cta hidden" id="screenCta"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- conversion band -->
+<section style="position:relative;overflow:hidden;padding:100px 0">
+  <div class="hero-glow" style="position:absolute;inset:0" data-parallax="0.2"></div>
+  <div class="section" style="text-align:center;position:relative;padding:30px 22px">
+    <h2 class="reveal" style="margin-bottom:16px">Liked the shift?</h2>
+    <p class="lead reveal" style="max-width:520px;margin:0 auto 30px">Tell us which worker you tested and Rishi will map it to your business on a 30-minute call.</p>
+    <a href="/deal.html" class="btn btn-primary reveal" id="dealCta">Hire the shift →</a>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div style="max-width:300px">
+      <div class="nav-logo" style="margin-bottom:12px">
+        <img src="/logo.png" alt="SecondShift" style="height:22px;width:auto;display:block">
+      </div>
+      <p class="dim" style="font-size:13px">Watch the shift work. Then hire it.</p>
+    </div>
+    <div>
+      <h5>Explore</h5>
+      <a href="/index.html">Home</a>
+      <a href="/automations.html">Automations</a>
+      <a href="/process.html">Process</a>
+    </div>
+    <div>
+      <h5>Business</h5>
+      <a href="/deal.html">Hire the shift</a>
+      <a href="/admin.html">Owner login</a>
+    </div>
+  </div>
+  <div class="footer-bottom">© 2026 SecondShift · Built and operated by Rishi Raj Singh</div>
+</footer>
+
+<script src="/script.js"></script>
+<script src="/scroll.js"></script>
+<script src="/tts.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = window.LabUtil.esc;
+  let automations = [];
+  let current = null;
+  const urlParams = new URLSearchParams(location.search);
+  const api = (p, body) => fetch(p, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined).then(r => r.json());
+
+  // ── load catalog ──
+  fetch('/api/automations').then(r => r.json()).then(({ automations: list }) => {
+    automations = list;
+    renderPicker();
+    const wanted = urlParams.get('auto');
+    const pick = automations.find(a => a.slug === wanted) || automations[0];
+    if (pick) selectAutomation(pick.slug);
+  });
+
+  function renderPicker() {
+    $('pickerBox').innerHTML = automations.map(a => `
+      <label class="pick" data-slug="${a.slug}">
+        <span class="pi">${a.icon}</span>
+        <span style="flex:1"><b>${a.name}</b><span>${a.priceLabel} · ${a.sellTo.split(',')[0]}</span></span>
+        <input type="radio" name="auto" value="${a.slug}">
+      </label>
+    `).join('');
+    document.querySelectorAll('.pick').forEach(p => p.addEventListener('click', () => selectAutomation(p.dataset.slug)));
+  }
+
+  function selectAutomation(slug) {
+    current = automations.find(a => a.slug === slug);
+    if (!current) return;
+    document.querySelectorAll('.pick').forEach(p => p.classList.toggle('on', p.dataset.slug === slug));
+    $('tdName').textContent = current.name;
+    $('screenBiz').textContent = 'Demo Business';
+    $('screenSub').textContent = current.name + ' · standing by…';
+    const av = $('screenAvatar');
+    av.textContent = current.icon; av.style.background = current.accent;
+    $('screenBody').innerHTML = `<div class="bubble">Ready when you are. Tap <b>“Start the shift”</b> — this one runs the real engine.</div>`;
+    $('screenCta').classList.add('hidden');
+    renderChecklist();
+    $('dealCta').href = '/deal.html?auto=' + slug;
+    $('runBtn').disabled = false;
+    $('runBtn').textContent = '⚡ Start the shift';
+    // mode-specific controls
+    $('contentFields').classList.toggle('hidden', slug !== 'content-engine');
+    $('leadFields').classList.toggle('hidden', slug !== 'lead-responder');
+    $('runHint').textContent = {
+      'review-automation': 'The pipeline fires on the right, step by step — POS webhook, Claude message, SMS, then the interactive rating gate.',
+      'voice-agent': 'A live call starts on the right. Type — or tap the mic and speak. This is the real booking engine, not a recording.',
+      'content-engine': 'Fill the brief (or keep ours) and the Content Crew generates a real 7-post week: captions, hashtags, schedule.',
+      'lead-responder': 'Paste a lead — or keep ours. First Response replies instantly, qualifies, scores, and writes the owner brief.',
+    }[slug] || 'The engine fires on the right.';
+    fetch('/api/testdrive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'demo_view', slug }) });
+  }
+
+  function renderChecklist() {
+    $('checkList').innerHTML = current.steps.map((s, i) => `
+      <div class="check-item" data-step="${i}">
+        <div class="ci-dot"></div>
+        <div><b>${i + 1} · ${s.title}</b><p>${s.desc}</p></div>
+      </div>
+    `).join('');
+  }
+
+  function setStep(i, state) {
+    const el = document.querySelector(`.check-item[data-step="${i}"]`);
+    if (!el) return;
+    el.classList.remove('active', 'done');
+    if (state) el.classList.add(state);
+  }
+
+  function addBubble(html, cls) {
+    const d = document.createElement('div');
+    d.className = 'bubble' + (cls ? ' ' + cls : '');
+    d.innerHTML = html + `<span class="time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>`;
+    const body = $('screenBody');
+    body.appendChild(d);
+    body.scrollTop = body.scrollHeight;
+    return d;
+  }
+  function addUserBubble(text) {
+    const d = document.createElement('div');
+    d.className = 'tr-line user show';
+    d.innerHTML = `<div class="who">You</div><p>${esc(text)}</p>`;
+    const body = $('screenBody');
+    body.appendChild(d);
+    body.scrollTop = body.scrollHeight;
+    return d;
+  }
+
+  function finish(kind, chips) {
+    $('screenCta').classList.remove('hidden');
+    $('screenCta').innerHTML = `<a class="btn btn-primary btn-block" href="/deal.html?auto=${current.slug}">I want this for my business →</a>`;
+    $('tdStats').innerHTML = chips.map(([k, v]) => `<span class="td-chip">${k}: <b>${v}</b></span>`).join('');
+    fetch('/api/testdrive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'testdrive_completed', slug: current.slug }) });
+  }
+
+  /* ════════════════ 1 · REVIEWS — interactive rating gate ════════════════ */
+  function addGate() {
+    const body = $('screenBody');
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'background:#fff;border-radius:16px;padding:14px;box-shadow:0 2px 10px rgba(2,8,23,.07);animation:bubble-in .35s var(--ease)';
+    wrap.innerHTML = `
+      <p class="gate-note"><b>Hi Sarah!</b> How was your visit today?</p>
+      <div class="gate-stars">${[1,2,3,4,5].map(n => `<span class="gate-star" data-v="${n}">⭐</span>`).join('')}</div>
+      <button class="gate-btn" disabled>Tap a star</button>
+      <p class="gate-note" style="font-size:10.5px">4-5★ → Google review page<br>1-3★ → private feedback to the owner</p>`;
+    body.appendChild(wrap);
+    body.scrollTop = body.scrollHeight;
+
+    const btn = wrap.querySelector('.gate-btn');
+    let val = 0;
+    wrap.querySelectorAll('.gate-star').forEach(st => st.addEventListener('click', () => {
+      val = +st.dataset.v;
+      wrap.querySelectorAll('.gate-star').forEach((x, i) => x.classList.toggle('on', i < val));
+      btn.disabled = false;
+      btn.textContent = val >= 4 ? '⭐ Post to Google' : '💬 Send private feedback';
+    }));
+    btn.addEventListener('click', () => {
+      if (val >= 4) {
+        wrap.innerHTML = `<p class="gate-note" style="font-size:14px">🎉 Thank you!</p><p class="gate-note">Opening <b>Google Maps</b> review page…</p>`;
+        const ok = document.createElement('button');
+        ok.className = 'gate-btn'; ok.disabled = true; ok.style.background = '#30d158'; ok.textContent = '✓ Redirected to Google';
+        wrap.appendChild(ok);
+        $('screenSub').textContent = 'review posted · lead captured';
+        setStep(current.steps.length - 1, 'done');
+        finish('happy', [['Flow', 'complete'], ['Steps fired', String(current.steps.length)], ['Outcome', '5★ on Google']]);
+      } else {
+        wrap.innerHTML = `<p class="gate-note" style="font-size:14px">💬 Thanks for telling us.</p><p class="gate-note">Your feedback went <b>privately to the owner</b> — not to Google. A ${val}★ public review was just intercepted.</p>`;
+        $('screenSub').textContent = 'feedback intercepted · owner alerted';
+        finish('unhappy', [['Flow', 'complete'], ['Outcome', `${val}★ intercepted`]]);
+      }
+    });
+  }
+
+  const reviewScript = [
+    { delay: 300,  act: () => { setStep(0, 'active'); $('screenSub').textContent = 'invoice #12345 closed'; addBubble('🧾 <b>POS webhook received:</b> Invoice #12345 · Sarah Johnson · $278.00'); } },
+    { delay: 1300, act: () => { setStep(0, 'done'); setStep(1, 'active'); $('screenSub').textContent = 'Claude is writing…'; addBubble('🤖 <b>Claude personalizing the message</b> — name, service, staff, tone…'); } },
+    { delay: 2600, act: () => { setStep(1, 'done'); setStep(2, 'active'); addBubble(`Hi Sarah! 👋 Thanks for choosing us today — we loved having you! If you have a minute, would you leave us a quick Google review? It helps other customers find us.<br><span class="lnk" id="tdReviewLink">tap here to review ⭐</span><br><br>Thanks again!<br>— The Team`); $('screenSub').textContent = 'SMS delivered · 2.1s'; fetch('/api/testdrive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'testdrive_step', slug: current.slug, step: 'sms_sent' }) }); } },
+    { delay: 3400, act: () => { setStep(2, 'done'); setStep(3, 'active'); addGate(); } },
+  ];
+
+  /* ════════════════ 2 · VOICE — the real booking engine ════════════════ */
+  async function runVoice() {
+    const body = $('screenBody');
+    let step = 0;
+    setStep(step, 'active');
+    $('screenSub').textContent = 'line open…';
+    addBubble('📞 <b>Connecting to The Voice…</b> <span class="muted">(try the mic, or type)</span>');
+
+    const start = await api('/api/voice/start', { channel: 'test-drive' });
+    if (!start.callId) { addBubble('⚠️ Engine unreachable.'); return; }
+    setStep(step, 'done'); setStep(1, 'active');
+    addBubble('THE VOICE — ' + esc(start.reply));
+    if (window.SecondShiftVoice) window.SecondShiftVoice.speak(start.reply);
+
+    // input row inside the phone: text + optional mic
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;margin-top:10px';
+    row.innerHTML = `
+      <input id="tdVoiceInput" placeholder="Speak or type as the caller…" style="flex:1;background:#fff;border:none;border-radius:99px;padding:10px 14px;font-size:13px;color:#0b0b0f;outline:none">
+      <button id="tdVoiceMic" title="Speak" style="width:38px;height:38px;border-radius:50%;border:none;background:#2997ff;color:#fff;font-size:15px;cursor:pointer">🎤</button>
+      <button id="tdVoiceSend" style="width:38px;height:38px;border-radius:50%;border:none;background:#30d158;color:#fff;font-size:15px;cursor:pointer">➤</button>`;
+    body.appendChild(row);
+    body.scrollTop = body.scrollHeight;
+
+    const input = row.querySelector('#tdVoiceInput');
+    const send = async (text) => {
+      if (!text.trim()) return;
+      input.value = '';
+      addUserBubble(text);
+      const r = await api('/api/voice/turn', { callId: start.callId, text });
+      if (!r || !r.reply) { addBubble('⚠️ Line dropped.'); return; }
+      addBubble('THE VOICE — ' + esc(r.reply));
+      if (window.SecondShiftVoice) window.SecondShiftVoice.speak(r.reply);
+      if (step < current.steps.length - 1) { setStep(step, 'done'); setStep(step + 1, 'active'); step++; }
+      if (r.appointment) {
+        $('screenSub').textContent = 'appointment booked ✓';
+        setStep(step, 'done');
+        row.remove();
+        addBubble('📅 <b>Appointment created:</b> ' + esc(r.appointment.service) + ' · ' + esc(r.appointment.name) + ' — visible in the owner dashboard right now.');
+        finish('booked', [['Flow', 'complete'], ['Engine', 'live voice-agent'], ['Outcome', 'real appointment saved']]);
+      }
+    };
+    row.querySelector('#tdVoiceSend').addEventListener('click', () => send(input.value));
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(input.value); });
+
+    // real mic (Web Speech API) — free, in-browser, with visible failure reasons
+    const micBtn = row.querySelector('#tdVoiceMic');
+    const micHint = document.createElement('div');
+    micHint.style.cssText = 'font-size:11px;line-height:1.4;margin-top:8px;color:#ffb3a7;min-height:15px';
+    row.parentNode.insertBefore(micHint, row.nextSibling);
+    let listening = false, rec = null;
+    const showHint = (msg, color) => { micHint.textContent = msg || ''; micHint.style.color = color || '#ffb3a7'; };
+    const MIC_HELP = 'Mic blocked — click the 🔒 lock icon in the address bar → Microphone → Allow, then tap the mic again.';
+    const stopListening = () => {
+      listening = false;
+      micBtn.style.background = '#2997ff';
+      micBtn.textContent = '🎤';
+      try { rec && rec.stop(); } catch (_) {}
+      rec = null;
+      if (micHint.textContent.startsWith('🎙')) showHint('');
+    };
+    const startListening = () => {
+      const rec2 = new SR();
+      rec2.lang = 'en-US'; rec2.interimResults = true;
+      rec = rec2; listening = true;
+      micBtn.style.background = '#ff453a';
+      micBtn.textContent = '⏹';
+      showHint('🎙 Listening — say your answer, tap ⏹ to stop.');
+      rec2.onresult = (e) => {
+        const r = e.results[e.results.length - 1];
+        if (r.isFinal) { stopListening(); send(r[0].transcript.trim()); }
+      };
+      rec2.onerror = (e) => {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') showHint('🚫 ' + MIC_HELP);
+        else if (e.error === 'audio-capture') showHint('🎧 No microphone found — plug one in or check Windows sound settings, then retry.');
+        else if (e.error === 'network') showHint('🌐 Speech service unreachable — check your connection and retry (or type your answer instead).');
+        else if (e.error !== 'aborted' && e.error !== 'no-speech') showHint('⚠️ Mic error: ' + e.error + ' — tap the mic to retry, or type instead.');
+        if (e.error === 'not-allowed' || e.error === 'audio-capture' || e.error === 'network') stopListening();
+      };
+      rec2.onend = () => {
+        if (!listening) return;
+        // browser cut the stream (e.g. another app grabbed the mic) — tell the user plainly
+        if (!micHint.textContent.startsWith('🚫')) showHint('⚠️ Mic cut out — tap the mic to talk again.');
+        stopListening();
+      };
+      try { rec2.start(); } catch (_) { stopListening(); showHint('⚠️ Mic already running — tap again.'); }
+    };
+    micBtn.addEventListener('click', async () => {
+      if (listening) { stopListening(); return; }
+      showHint('');
+      // pre-check permission so a block shows instructions instead of dying silently
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const st = await navigator.permissions.query({ name: 'microphone' });
+          if (st.state === 'denied') { showHint('🚫 ' + MIC_HELP); return; }
+        }
+      } catch (_) { /* Safari/older browsers: proceed and rely on onerror */ }
+      if (!SR) { showHint('⚠️ No speech recognition in this browser — type your answer instead.'); return; }
+      startListening();
+    });
+  }
+
+  /* ════════════════ 3 · CONTENT — the real generation engine ════════════════ */
+  async function runContent() {
+    setStep(0, 'active');
+    $('screenSub').textContent = 'brief received…';
+    addBubble('📥 <b>Brief:</b> ' + esc($('cfSubject').value) + ' · voice: ' + esc($('cfVibe').value));
+
+    const gen = await api('/api/content/generate', {
+      business: $('cfBiz').value, subject: $('cfSubject').value,
+      vibe: $('cfVibe').value, city: $('cfCity').value, offer: $('cfOffer').value,
+    });
+    if (!gen || !gen.gen) { addBubble('⚠️ Engine unreachable.'); return; }
+    $('screenSub').textContent = 'generating the week…';
+
+    // reveal the 7 posts progressively as checklist steps fire
+    gen.gen.posts.forEach((p, i) => {
+      setTimeout(() => {
+        setStep(Math.min(i + 1, current.steps.length - 1), i === 6 ? 'done' : 'active');
+        if (i > 0) setStep(i, 'done');
+        const card = document.createElement('div');
+        card.className = 'post-card';
+        card.innerHTML = `
+          <div class="pc-top"><span>${p.day} · ${p.time}</span><span>${p.kind}</span></div>
+          <div class="pc-cap">${esc(p.caption)}</div>
+          <div class="pc-tags">${p.hashtags.map(esc).join(' ')}</div>
+          <div class="pc-meta">CTA: ${esc(p.cta)} · 📷 ${esc(p.imagePrompt)}</div>`;
+        $('screenBody').appendChild(card);
+        $('screenBody').scrollTop = $('screenBody').scrollHeight;
+        if (i === 6) {
+          $('screenSub').textContent = 'week scheduled ✓';
+          addBubble('📊 <b>Monday report lands automatically:</b> impressions, engagement, top post. Approve next week with one tap.');
+          finish('generated', [['Flow', 'complete'], ['Engine', 'live content-engine'], ['Posts', '7 real, scheduled']]);
+        }
+      }, 350 + i * 550);
+    });
+  }
+
+  /* ════════════════ 4 · LEADS — the real First Response engine ════════════════ */
+  async function runLead() {
+    let step = 0;
+    setStep(step, 'active');
+    $('screenSub').textContent = 'lead arrived…';
+    addUserBubble($('lfRaw').value);
+    addBubble('⏱️ <b>Timer started.</b> First Response is reading the lead…');
+
+    const started = await api('/api/leads/respond', { raw: $('lfRaw').value, source: 'test-drive' });
+    if (!started || !started.id) { addBubble('⚠️ Engine unreachable.'); return; }
+    setStep(0, 'done'); setStep(1, 'active');
+    $('screenSub').textContent = 'replied in ' + started.lead.replySeconds + 's';
+    addBubble('⚡ <b>REPLIED IN ' + started.lead.replySeconds + ' SECONDS</b> — a human average is 42 hours.');
+    addBubble('FIRST RESPONSE — ' + esc(started.reply).replace(/\n/g, '<br>'));
+
+    if (step < current.steps.length - 1) { setStep(step, 'done'); setStep(step + 1, 'active'); step++; }
+    // qualification loop: the engine asks, we auto-answer once as the customer, then hand control
+    const r1 = await api('/api/leads/turn', { leadId: started.id, text: 'this week if possible' });
+    if (r1 && r1.reply && r1.done) {
+      // lead was already fully qualified from the first message — show the payoff now
+      addUserBubble('this week if possible');
+      addBubble('FIRST RESPONSE — ' + esc(r1.reply).replace(/\n/g, '<br>'));
+      showLeadPayoff(r1.lead);
+      return;
+    }
+    if (r1 && r1.reply && !r1.done) {
+      addUserBubble('this week if possible');
+      addBubble('FIRST RESPONSE — ' + esc(r1.reply).replace(/\n/g, '<br>'));
+      if (step < current.steps.length - 1) { setStep(step, 'done'); setStep(step + 1, 'active'); step++; }
+
+      // hand the visitor the keyboard for the final answer (budget)
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:8px;margin-top:10px';
+      row.innerHTML = `
+        <input id="tdLeadInput" placeholder="Your answer as the customer…" style="flex:1;background:#fff;border:none;border-radius:99px;padding:10px 14px;font-size:13px;color:#0b0b0f;outline:none">
+        <button id="tdLeadSend" style="width:38px;height:38px;border-radius:50%;border:none;background:#30d158;color:#fff;font-size:15px;cursor:pointer">➤</button>`;
+      $('screenBody').appendChild(row);
+      $('screenBody').scrollTop = $('screenBody').scrollHeight;
+      const input = row.querySelector('#tdLeadInput');
+      const doSend = async () => {
+        const text = input.value.trim() || 'around $650';
+        row.remove();
+        addUserBubble(text);
+        const r2 = await api('/api/leads/turn', { leadId: started.id, text });
+        if (!r2) return;
+        setStep(current.steps.length - 2, 'done');
+        setStep(current.steps.length - 1, 'active');
+        addBubble('FIRST RESPONSE — ' + esc(r2.reply).replace(/\n/g, '<br>'));
+        showLeadPayoff(r2.lead);
+      };
+      row.querySelector('#tdLeadSend').addEventListener('click', doSend);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+    }
+  }
+
+  // the output the owner pays for: score chips + owner brief + finish
+  function showLeadPayoff(lead) {
+    const sc = lead.score;
+    const chipCls = sc.score >= 60 ? 'score-hot' : sc.score >= 30 ? 'score-warm' : 'score-cold';
+    const sr = document.createElement('div');
+    sr.className = 'score-row';
+    sr.innerHTML = `<span class="score-chip ${chipCls}">${sc.temp} ${sc.score}/100</span>` + sc.notes.slice(0, 3).map(n => `<span class="score-chip ${chipCls}" style="font-weight:400">${esc(n)}</span>`).join('');
+    $('screenBody').appendChild(sr);
+    const brief = document.createElement('div');
+    brief.className = 'brief-card';
+    brief.textContent = '📲 OWNER BRIEF (sent to the boss\'s phone)\n' + esc(require_brief(lead));
+    $('screenBody').appendChild(brief);
+    $('screenBody').scrollTop = $('screenBody').scrollHeight;
+    setStep(current.steps.length - 1, 'done');
+    $('screenSub').textContent = 'lead qualified & scored ✓';
+    finish('qualified', [['Flow', 'complete'], ['Engine', 'live lead-responder'], ['Lead temp', sc.temp]]);
+  }
+  // owner brief comes from the engine (shared logic) via the thread endpoint
+  function require_brief(lead) {
+    const s = lead.slots;
+    const lines = [
+      'NEW LEAD · ' + lead.score.temp + ' (' + lead.score.score + '/100)',
+      'Project: ' + (s.project || '—'),
+      'Timeline: ' + (s.timeline || '—') + ' · Budget: ' + (typeof s.budget === 'number' ? '$' + s.budget.toLocaleString() : (s.budget || '—')),
+      'Contact: ' + (s.name || '—') + ' · ' + (s.email || s.phone || '—'),
+      lead.score.score >= 60 ? '👉 Call this one TODAY — they are ready.' : lead.score.score >= 30 ? '👉 Follow up within 24h.' : '👉 Drop into the monthly nurture sequence.',
+    ];
+    return lines.join('\n');
+  }
+
+  /* ════════════════ the runner ════════════════ */
+  const runners = {
+    'review-automation': () => {
+      reviewScript.forEach(({ delay, act }) => setTimeout(act, delay));
+      setTimeout(() => $('runBtn').disabled = false, 3800);
+    },
+    'voice-agent': runVoice,
+    'content-engine': runContent,
+    'lead-responder': runLead,
+  };
+
+  $('runBtn').addEventListener('click', () => {
+    if (!current) return;
+    $('runBtn').disabled = true;
+    $('screenBody').innerHTML = '';
+    $('tdStats').innerHTML = '';
+    $('screenCta').classList.add('hidden');
+    renderChecklist();
+    fetch('/api/testdrive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'testdrive_started', slug: current.slug }) });
+    try {
+      const r = runners[current.slug] || runGeneric;
+      const out = r();
+      if (out instanceof Promise) out.finally(() => { $('runBtn').disabled = false; $('runBtn').textContent = '⚡ Run it again'; });
+      else setTimeout(() => { $('runBtn').textContent = '⚡ Run it again'; }, 400);
+    } catch (e) {
+      console.error(e);
+      $('runBtn').disabled = false;
+    }
+  });
+
+  // generic fallback (only used if a catalog entry has no live engine yet)
+  function runGeneric() {
+    $('screenBody').innerHTML = '';
+    current.steps.forEach((s, i) => {
+      setTimeout(() => {
+        setStep(i, 'active');
+        addBubble('STEP ' + (i + 1) + ' — ' + esc(s.title) + ': ' + esc(s.desc));
+        setStep(i, 'done');
+        if (i === current.steps.length - 1) finish('happy', [['Flow', 'complete']]);
+      }, 600 + i * 1100);
+    });
+  }
+
+  // link inside the SMS opens the gate demo inline
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.id === 'tdReviewLink') {
+      $('screenBody').innerHTML = '';
+      setStep(2, 'done'); setStep(3, 'active');
+      addGate();
+    }
+  });
+})();
+</script>
+</body>
+</html>

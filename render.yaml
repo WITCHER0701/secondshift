@@ -1,0 +1,23 @@
+# Render Blueprint — one command deploys SecondShift.
+# After connecting the GitHub repo: Render Dashboard → New → Blueprint
+# picks this file up automatically. Free instance, auto-deploys on push.
+services:
+  - type: web
+    name: secondshift
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_PASSWORD
+        sync: false   # set by hand in the dashboard — never in git
+      - key: CLOUD_GIST_TOKEN
+        sync: false   # optional — enables cloud data persistence
+      - key: GIST_ID
+        sync: false   # optional — filled once after the first push
