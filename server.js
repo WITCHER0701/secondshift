@@ -150,7 +150,12 @@ app.get('/api/vapi/config', (req, res) => {
 // speaks the reply. Our deterministic brain still makes every decision.
 const vapiBridge = require('./vapi-bridge');
 const VAPI_SECRET = process.env.VAPI_SERVER_SECRET || '';
+// ground truth for "did Vapi reach the brain" — surfaced via /api/vapi/ping
+// so call failures can be split into brain-side vs voice-side without Render Logs.
+const vapiBridgeStats = { hits: 0, lastAt: null, lastReply: '' };
 app.post('/vapi/chat/completions', (req, res) => {
+  vapiBridgeStats.hits++;
+  vapiBridgeStats.lastAt = new Date().toISOString();
   console.log('[vapi-bridge] turn received — msgs:', (req.body && req.body.messages || []).length);
   if (VAPI_SECRET) {
     const auth = req.get('authorization') || '';
@@ -163,6 +168,7 @@ app.post('/vapi/chat/completions', (req, res) => {
       createAppointment: (p) => store.createAppointment(p),
       addEvent: (type, data) => store.addEvent(type, data),
     });
+    vapiBridgeStats.lastReply = String(reply || '').slice(0, 120);
     res.json({
       id: 'chatcmpl-' + Date.now().toString(36),
       object: 'chat.completion',
@@ -174,6 +180,10 @@ app.post('/vapi/chat/completions', (req, res) => {
     console.error('[vapi-bridge]', e);
     res.status(500).json({ error: 'brain error' });
   }
+});
+// public: lets voice.html (and you) verify whether Vapi reached the brain
+app.get('/api/vapi/ping', (req, res) => {
+  res.json({ ok: true, bridgeHits: vapiBridgeStats.hits, lastHitAt: vapiBridgeStats.lastAt, lastReply: vapiBridgeStats.lastReply });
 });
 app.get('/api/voice/appointments', requireAdmin, (req, res) => res.json({ appointments: store.listAppointments().slice(0, 50) }));
 app.get('/api/voice/session/:id', (req, res) => {

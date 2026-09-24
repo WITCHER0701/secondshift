@@ -54,6 +54,14 @@ Then set:
 - **Transcriber:** Deepgram Nova (default is fine)
 - **Voice:** any premium voice you like (this is where Vapi beats the free
   browser stack — try ElevenLabs voices)
+  > ⚠️ **Voice config is the #1 silent-call cause.** If the saved voice is
+  > invalid, misconfigured, or the account can't synthesize with it, the call
+  > still connects, the caller is transcribed, transcripts of replies even
+  > arrive — but **no audio is ever produced**. If calls go silent: dashboard →
+  > Assistant → Voice → pick a built-in **Vapi voice** (e.g. `Elliot`, `Emma`,
+  > `v2`) → Publish a new version → retest. Do NOT work around this with
+  > per-call `voice` overrides from the web SDK — tested live, overriding the
+  > voice at call time can stop model turns from being generated entirely.
 - **Client messages:** enable `transcript` (the web panel renders live captions)
 
 ### 3 · Environment variables
