@@ -357,6 +357,13 @@ h3 { font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; }
 .form-error { color: #ff6b6b; font-size: 13px; margin-top: 10px; display: none; }
 .form-error.show { display: block; }
 
+/* deal page two-column layout (responsive — never inline-style the grid) */
+.deal-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px; align-items: start; }
+@media (max-width: 900px) { .deal-grid { grid-template-columns: 1fr; } }
+.steps-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 960px) { .steps-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .steps-4 { grid-template-columns: 1fr; } }
+
 /* checkbox pills for automation picker */
 .picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .pick {

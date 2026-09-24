@@ -449,6 +449,25 @@
   $('textInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { send($('textInput').value.trim()); setTimeout(syncSlots, 600); } });
 
   // ── Vapi pro line (optional upgrade — works when server env is set) ──
+  // Vapi/Daily error events nest objects inside objects (an error's .message can
+  // itself be an object) — printing one raw gives "[object Object]". Coerce every
+  // candidate to a real string and always leave a readable breadcrumb.
+  function fmtErr(e) {
+    if (!e) return 'unknown error';
+    if (typeof e === 'string') return e;
+    const str = (x) => (typeof x === 'string' && x) || (typeof x === 'number' ? String(x) : '');
+    // Vapi/Daily nest the payload 2-3 levels deep (e.error.message.errorMsg …) —
+    // walk the common keys until a real string falls out.
+    const dig = (o, depth) => {
+      if (!o || typeof o !== 'object' || depth > 2) return '';
+      return str(o.errorMsg) || str(o.message) || str(o.errorMessage) || str(o.msg) || str(o.description) || str(o.reason)
+        || dig(o.message, depth + 1) || dig(o.error, depth + 1);
+    };
+    let msg = str(e.errorMsg) || str(e.message) || dig(e, 0);
+    if (!msg) { try { msg = JSON.stringify(e).slice(0, 160); } catch (x) {} }
+    if (!msg || msg === '{}' || msg === '[]') msg = (e.type || e.stage || 'error') + ' — no detail (check Render logs)';
+    return (e.type && e.type !== 'error' ? '[' + e.type + '] ' : '') + msg;
+  }
   let vapi = null;
   let vapiActive = false;
   const vapiDot = $('vapiDot'), vapiLabel = $('vapiLabel'), vapiHint = $('vapiHint');
@@ -514,7 +533,7 @@
             vapi.on('call-end', () => { vapiActive = false; vapiState('', 'Pro line: ended', true, false); setStatus('Call ended', false); });
             vapi.on('speech-start', () => { speechSeen = true; vapiState('kokoro', 'Pro line: LIVE · speaking', false, true); });
             vapi.on('speech-end', () => { if (vapiActive) vapiState('kokoro', 'Pro line: LIVE', false, true); });
-            vapi.on('error', (e) => { vapiActive = false; vapiState('sys', 'Pro line: error', true, false); addLine('agent', '⚠️ ' + (typeof e === 'object' ? ((e && (e.errorMsg || e.message)) || (e && e.error && (e.error.message || e.error.errorMsg)) || JSON.stringify(e).slice(0, 160)) : String(e))); });
+            vapi.on('error', (e) => { vapiActive = false; vapiState('sys', 'Pro line: error', true, false); addLine('agent', '⚠️ ' + fmtErr(e)); });
             vapi.on('message', (m) => {
               if (m.type === 'transcript' && m.transcriptType === 'final') {
                 addLine(m.role === 'assistant' ? 'agent' : 'caller', m.transcript);
