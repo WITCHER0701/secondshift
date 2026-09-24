@@ -59,6 +59,10 @@
   .vb-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-card); color: var(--text); cursor: pointer; }
   .vb-btn:hover { border-color: var(--accent); }
   @media (max-width: 900px) { .call-grid { grid-template-columns: 1fr; } }
+  .ptt-modes { display: flex; gap: 8px; justify-content: center; margin: 18px 0 0; }
+  .ptt-pill { border: 1px solid var(--line-strong); background: var(--bg-raise); color: var(--text-2); border-radius: 99px; padding: 7px 14px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .ptt-pill.on { border-color: var(--accent); color: var(--accent); background: rgba(41, 151, 255, .1); }
+  #micBtn { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 </style>
   <meta property="og:title" content="SecondShift — business automations that work after close">
   <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
@@ -92,6 +96,10 @@
         <span id="statusText">Ready — tap the mic and just talk</span>
       </div>
       <div class="call-log" id="callLog"></div>
+      <div class="ptt-modes">
+        <button type="button" class="ptt-pill" data-mode="ptt">🖐 Hold to talk</button>
+        <button type="button" class="ptt-pill" data-mode="open">📡 Open mic</button>
+      </div>
       <button class="mic-big" id="micBtn" aria-label="Start talking" title="Tap to talk">
         <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
           <rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/>
@@ -269,7 +277,7 @@
       }
     } catch (e) { setStatus('Connection hiccup — try again', false); }
     busy = false;
-    setStatus(listening ? 'Listening…' : 'Tap the mic to keep talking', listening);
+    setStatus(listening ? 'Listening…' : (voiceMode === 'ptt' ? 'Hold the mic to keep talking' : 'Tap the mic to keep talking'), listening);
   }
 
   // simplified slot sync: parse from session via a light endpoint
@@ -289,13 +297,13 @@
   let gotAnyAudio = false;
   let submitTimer = null, restartTimer = null, watchdog = null;
 
-  function micHintDefault() { $('micHint').textContent = 'or type below — both work the same'; }
+  function micHintDefault() { $('micHint').textContent = voiceMode === 'ptt' ? 'hold the mic and speak — release to send' : 'or type below — both work the same'; }
   function micError(msg) {
     $('micHint').innerHTML = '<span style="color:#ff6b6b">' + msg + '</span>';
     setStatus('Mic problem — see the note below', false);
   }
   function updateMicVisual() {
-    $('micBtn').classList.toggle('listening', micSession);
+    $('micBtn').classList.toggle('listening', micSession || pttActive);
     $('wave').classList.toggle('live', listening);
   }
 
@@ -397,6 +405,7 @@
   });
 
   $('micBtn').addEventListener('click', async () => {
+    if (voiceMode === 'ptt') return; // hold-to-talk owns the button (see push-to-talk section)
     if (!SR) {
       micError('This browser has no speech recognition. Use Chrome or Edge — or type below, it works identically.');
       return;
@@ -532,7 +541,18 @@
             let lastFinal = { role: '', text: '' };
             let speechSeen = false;
             vapi.on('call-start', () => {
-              vapiActive = true; addLine('agent', '— pro line connected —'); vapiState('kokoro', 'Pro line: LIVE', false, true); setStatus('Pro line live — just talk', true);
+              vapiActive = true;
+              // the free mic and the pro mic must never listen at once — close the open line
+              if (micSession) {
+                micSession = false;
+                clearTimeout(restartTimer); clearTimeout(submitTimer);
+                try { recog && recog.stop(); } catch (e) {}
+                updateMicVisual();
+              }
+              // hold-to-talk mode: the pro line starts muted — the mic button opens it
+              if (voiceMode === 'ptt') { try { vapi.setMuted(true); } catch (e) {} }
+              addLine('agent', '— pro line connected —'); vapiState('kokoro', 'Pro line: LIVE', false, true);
+              setStatus(voiceMode === 'ptt' ? 'Pro line live — hold the mic to talk' : 'Pro line live — just talk', voiceMode !== 'ptt');
               brainPing().then(p => { if (p) brainTurnsAtStart = p.bridgeHits; });
               // audibility probe: if the caller can't hear this beep, it's the phone's
               // media volume (silent mode), not the agent.
@@ -583,6 +603,149 @@
     });
     $('vapiEnd').addEventListener('click', () => { try { vapi && vapi.stop(); } catch (e) {} });
   }).catch(() => {});
+
+  // ── push-to-talk: hold the mic, release to send ────────────────────
+  // The open line stays for desktop; phones (or by choice) get hold-to-talk:
+  // press = listen, release = send & reply. Pointer events + touch-action:none
+  // keep scroll and long-press menus from breaking the gesture.
+  let pttActive = false;
+  let pttRecog = null;
+  let pttFlushTimer = null, pttMuteTimer = null;
+  let voiceMode = 'open';
+  try {
+    voiceMode = localStorage.getItem('ssVoiceMode')
+      || ((('ontouchstart' in window) || navigator.maxTouchPoints > 0) ? 'ptt' : 'open');
+  } catch (e) {}
+  document.querySelectorAll('.ptt-pill').forEach(p => p.classList.toggle('on', p.dataset.mode === voiceMode));
+
+  function submitUtterance(text) {
+    if (!text) { setStatus('Didn’t catch that — hold the mic while you speak', false); return; }
+    if (busy) { setTimeout(() => submitUtterance(text), 600); return; }
+    TTS.stop();
+    send(text);
+    syncSlots();
+  }
+
+  async function pttBegin() {
+    if (pttActive) return;
+    clearTimeout(pttMuteTimer);
+    if (pttFlushTimer) { // re-held before the previous utterance flushed — send it now
+      clearTimeout(pttFlushTimer); pttFlushTimer = null;
+      const pending = finalBuf.trim(); finalBuf = '';
+      if (pending) submitUtterance(pending);
+    }
+    pttActive = true;
+    updateMicVisual();
+    $('micHint').textContent = '🎙 listening — release to send';
+    TTS.stop();                       // barge-in: the agent yields
+    if (vapiActive) {                 // pro line: unmute while held
+      try { vapi.setMuted(false); } catch (e) {}
+      setStatus('Pro line open — speak now, release when done', true);
+      return;
+    }
+    if (!SR) { pttActive = false; updateMicVisual(); micError('This browser has no speech recognition — use the text box or the pro line.'); return; }
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        const p = await navigator.permissions.query({ name: 'microphone' });
+        if (p.state === 'denied') {
+          pttActive = false; updateMicVisual();
+          micError('Mic is blocked for this site. Click the lock/🔒 icon in the address bar → Site settings → Microphone → Allow, then hold the mic again.');
+          return;
+        }
+      }
+    } catch (e) { /* older browsers: rely on the onerror path */ }
+    startPttRecog();
+  }
+
+  function startPttRecog() {
+    finalBuf = '';
+    pttRecog = new SR();
+    pttRecog.lang = 'en-US';
+    pttRecog.interimResults = true;
+    pttRecog.continuous = true;
+    pttRecog.onstart = () => { listening = true; gotAnyAudio = true; updateMicVisual(); setStatus('Listening — speak, then release', true); };
+    pttRecog.onresult = (e) => {
+      gotAnyAudio = true;
+      let interim = '', final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      if (interim) $('micHint').textContent = '🎙 ' + interim + '…';
+      if (final) { finalBuf += final + ' '; $('micHint').textContent = '🎙 ' + finalBuf.trim(); }
+    };
+    pttRecog.onerror = (e) => {
+      const err = e && e.error;
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
+        pttActive = false; updateMicVisual();
+        micError('Mic blocked — allow it in site settings, then hold the mic again.');
+      } else if (err === 'audio-capture') {
+        pttActive = false; updateMicVisual();
+        micError('No microphone detected — check your input device, or type below.');
+      } else if (err === 'network') {
+        micError('Speech service hiccup — release, then hold again.');
+      }
+      // no-speech / aborted: release just finds an empty buffer
+    };
+    pttRecog.onend = () => {
+      listening = false; updateMicVisual();
+      pttRecog = null;
+      if (pttActive) { try { startPttRecog(); } catch (e) {} } // browser cut us off mid-hold — keep listening
+    };
+    try { pttRecog.start(); } catch (e) { /* double start */ }
+  }
+
+  function pttEnd() {
+    if (!pttActive) return;
+    pttActive = false;
+    updateMicVisual();
+    setStatus('Thinking…', false);
+    if (vapiActive) {
+      // let the tail of the utterance reach Vapi, then close the line again
+      pttMuteTimer = setTimeout(() => { if (vapiActive && !pttActive) { try { vapi.setMuted(true); } catch (e) {} } }, 400);
+      return;
+    }
+    if (pttRecog) { try { pttRecog.stop(); } catch (e) {} }
+    // finals can land just after stop() — flush shortly, not instantly
+    pttFlushTimer = setTimeout(() => {
+      const text = finalBuf.trim();
+      finalBuf = '';
+      micHintDefault();
+      submitUtterance(text);
+    }, 350);
+  }
+
+  function setMode(m) {
+    if (pttActive) pttEnd();
+    if (m === 'ptt' && micSession) {  // close the open line before switching
+      micSession = false;
+      clearTimeout(restartTimer); clearTimeout(submitTimer);
+      try { recog && recog.stop(); } catch (e) {}
+    }
+    voiceMode = m;
+    try { localStorage.setItem('ssVoiceMode', m); } catch (e) {}
+    document.querySelectorAll('.ptt-pill').forEach(p => p.classList.toggle('on', p.dataset.mode === m));
+    if (vapiActive) {
+      try { vapi.setMuted(m === 'ptt'); } catch (e) {}
+      setStatus(m === 'ptt' ? 'Pro line: hold the mic to talk' : 'Pro line: open mic — just talk', false);
+    } else if (!micSession) {
+      setStatus(m === 'ptt' ? 'Ready — hold the mic and speak' : 'Ready — tap the mic and just talk', false);
+      micHintDefault();
+    }
+  }
+  document.querySelectorAll('.ptt-pill').forEach(pill => pill.addEventListener('click', () => setMode(pill.dataset.mode)));
+
+  const micBtnEl = $('micBtn');
+  micBtnEl.addEventListener('contextmenu', (e) => e.preventDefault()); // long-press menu kills the gesture
+  micBtnEl.addEventListener('pointerdown', (e) => {
+    if (voiceMode !== 'ptt') return;  // open mode keeps the tap-to-toggle click handler
+    e.preventDefault();
+    if (micBtnEl.setPointerCapture) { try { micBtnEl.setPointerCapture(e.pointerId); } catch (x) {} }
+    pttBegin();
+  });
+  micBtnEl.addEventListener('pointerup', () => { if (voiceMode === 'ptt') pttEnd(); });
+  micBtnEl.addEventListener('pointercancel', () => { if (voiceMode === 'ptt') pttEnd(); });
+  micBtnEl.addEventListener('lostpointercapture', () => { if (voiceMode === 'ptt' && pttActive) pttEnd(); });
 
   startCall();
 })();
