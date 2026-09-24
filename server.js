@@ -151,6 +151,7 @@ app.get('/api/vapi/config', (req, res) => {
 const vapiBridge = require('./vapi-bridge');
 const VAPI_SECRET = process.env.VAPI_SERVER_SECRET || '';
 app.post('/vapi/chat/completions', (req, res) => {
+  console.log('[vapi-bridge] turn received — msgs:', (req.body && req.body.messages || []).length);
   if (VAPI_SECRET) {
     const auth = req.get('authorization') || '';
     const presented = auth.replace(/^Bearer\s+/i, '').trim();
