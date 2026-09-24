@@ -453,7 +453,15 @@
         vapiState('loading', 'Pro line: connecting…', false, false);
         if (!window.vapiSDKClass) {
           const mod = await import('https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/+esm');
-          window.vapiSDKClass = mod.default;
+          // jsdelivr's +esm wrapper shifts exports between versions — resolve the
+          // constructor from every known shape instead of trusting .default
+          const cands = [mod.default && (mod.default.default || mod.default), mod.Vapi, mod.vapiSDKClass, mod.VapiClient, mod.web];
+          const cls = cands.find((c) => typeof c === 'function');
+          if (!cls) {
+            console.log('[vapi] module exports:', Object.keys(mod), 'default keys:', mod.default && Object.keys(mod.default));
+            throw new Error('SDK loaded but no constructor found — see console for exports');
+          }
+          window.vapiSDKClass = cls;
         }
         vapi = new window.vapiSDKClass(cfg.publicKey);
         vapi.on('call-start', () => { vapiActive = true; addLine('agent', '— pro line connected —'); vapiState('kokoro', 'Pro line: LIVE', false, true); setStatus('Pro line live — just talk', true); });
