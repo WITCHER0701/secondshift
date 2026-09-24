@@ -321,6 +321,7 @@
       setStatus('Line open — just talk naturally', true);
     };
     recog.onresult = (e) => {
+      netErrCount = 0; // speech worked — clear any network-failure streak
       gotAnyAudio = true;
       let interim = '', final = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -334,6 +335,7 @@
         scheduleSubmit();
       }
     };
+    let netErrCount = 0, lastNetErrAt = 0;
     recog.onerror = (e) => {
       const err = e && e.error;
       if (err === 'not-allowed' || err === 'service-not-allowed') {
@@ -343,8 +345,20 @@
         micSession = false; updateMicVisual();
         micError('No microphone detected. Plug one in (or unplug/replug USB mics), or just type below.');
       } else if (err === 'network') {
-        micError('Speech service hiccup — reconnecting…');
-        // onend will auto-restart
+        const now = Date.now();
+        netErrCount = (now - lastNetErrAt < 30000) ? netErrCount + 1 : 1;
+        lastNetErrAt = now;
+        if (netErrCount >= 2) {
+          // the speech backend is unreachable for THIS browser — retrying is pointless.
+          micSession = false; clearTimeout(restartTimer); updateMicVisual();
+          const isBrave = !!(navigator.brave && navigator.brave.isBrave);
+          micError(isBrave
+            ? '🦁 Brave blocks the speech service voice input depends on (Google\u2019s speech API). Options: use Chrome/Edge for the free mic · turn off Brave Shields for this site (lion icon 🦁 → Shields down) and tap the mic again · just type below · or use the PRO LINE (right panel) — it works in Brave and sounds better.'
+            : 'Speech service unreachable after several tries — check your internet, tap the mic to retry, just type below, or use the PRO LINE (right panel).');
+        } else {
+          micError('Speech service hiccup — reconnecting…');
+          // onend will auto-restart once more; a second failure stops the line
+        }
       }
       // no-speech / aborted: normal, onend auto-restarts
     };
