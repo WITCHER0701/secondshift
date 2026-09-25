@@ -15,7 +15,7 @@ not in this repo.
 
 ## Layout
 
-- **Stack location:** `D:\my LLM\.n8n-files\website\dograh\`
+- **Stack location:** `D:\my LLM\.n8n-files\website\secondshift\dograh\`
   (`docker-compose.yaml` + generated `.env` + `scripts/` + `deploy/`)
 - **UI:** http://localhost:3010 (login: the account you created on first run)
 - **Agent:** "SecondShift automation service tester - inbound" (workflow 1)
@@ -48,7 +48,7 @@ not in this repo.
 
 ```bash
 # start everything (Docker Desktop must be running)
-cd "/d/my LLM/.n8n-files/website/dograh"
+cd "/d/my LLM/.n8n-files/website/secondshift/dograh"
 docker compose --profile tunnel --profile local-turn up -d
 
 # stop
