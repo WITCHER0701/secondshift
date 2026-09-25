@@ -142,6 +142,16 @@
             <span id="vbRateVal" class="vb-title" style="width:32px;text-align:right">1×</span>
           </div>
         </div>
+        <div class="voice-box" id="dograhBox" style="border-color:rgba(16,185,129,.35)">
+          <div class="vb-row" style="justify-content:space-between">
+            <span class="vb-title"><span id="dograhDot" class="vb-dot"></span> <span id="dograhLabel">Free line: Dograh · not configured</span></span>
+          </div>
+          <p class="dim" id="dograhHint" style="font-size:11.5px;margin:8px 0 0;line-height:1.55">Free &amp; unlimited: a self-hosted <b>Dograh</b> agent (open-source, runs on our own server) takes the call — no Vapi credits, no per-minute billing. Needs the Docker stack up; if this stays gray, the tunnel URLs in .env need a refresh.</p>
+          <div class="vb-row" style="gap:8px;margin-top:10px">
+            <button id="dograhStart" class="btn btn-primary btn-sm" style="flex:1;display:none">🎙 Talk on the free line</button>
+            <button id="dograhEnd" class="btn btn-ghost btn-sm" style="flex:1;display:none">Hang up</button>
+          </div>
+        </div>
         <div class="voice-box" id="vapiBox" style="border-color:rgba(41,151,255,.35)">
           <div class="vb-row" style="justify-content:space-between">
             <span class="vb-title"><span id="vapiDot" class="vb-dot"></span> <span id="vapiLabel">Pro line: Vapi · not configured</span></span>
@@ -604,6 +614,102 @@
     $('vapiEnd').addEventListener('click', () => { try { vapi && vapi.stop(); } catch (e) {} });
   }).catch(() => {});
 
+  // ── Dograh free line (self-hosted, zero per-minute cost) ───────────
+  // The widget manages its own WebRTC mic and turn detection, so hold-to-talk
+  // and the pills don't apply here — it's always open-mic while connected.
+  // Ground truth for lifecycle is the floating pill's label (Dograh cycles it
+  // through Connecting… / End Call / Retry). The current widget build exposes
+  // onMessage only for CHAT widgets — voice transcripts aren't surfaced to the
+  // page yet (they still land in Dograh → Agent Runs), so the mirror below is
+  // future-proofing that stays silent today.
+  let dograhActive = false;
+  let dograhPoll = null;
+  const dograhDot = $('dograhDot'), dograhLabel = $('dograhLabel'), dograhHint = $('dograhHint');
+  function dograhState(dot, label, showStart, showEnd) {
+    dograhDot.className = 'vb-dot' + (dot ? ' ' + dot : '');
+    dograhLabel.textContent = label;
+    $('dograhStart').style.display = showStart ? '' : 'none';
+    $('dograhEnd').style.display = showEnd ? '' : 'none';
+  }
+  fetch('/api/dograh/config').then(r => r.json()).then((cfg) => {
+    if (!cfg.configured) return; // stays gray with the hint
+    dograhHint.innerHTML = 'Free &amp; unlimited — the call runs to <b>our own Dograh server</b> (self-hosted, open-source). The agent greets, listens and replies on its own; this page just mirrors the call here. No credits, no meter.';
+    dograhState('', 'Free line: Dograh · ready', true, false);
+    $('dograhStart').addEventListener('click', async () => {
+      try {
+        if (micSession) { // never two listeners at once
+          micSession = false; clearTimeout(restartTimer); clearTimeout(submitTimer);
+          try { recog && recog.stop(); } catch (e) {}
+          updateMicVisual();
+        }
+        if (!window.DograhWidget) {
+          dograhState('loading', 'Free line: loading…', false, false);
+          // same bootstrap the Dograh dashboard generates, pointed at our tunnels
+          await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.id = 'dograh-widget';
+            s.src = cfg.uiUrl + '/embed/dograh-widget.js?token=' + encodeURIComponent(cfg.token) + '&environment=local&apiEndpoint=' + encodeURIComponent(cfg.apiUrl);
+            s.setAttribute('data-dograh-context', JSON.stringify({ page_url: location.href, today: new Date().toISOString().slice(0, 10) }));
+            s.async = true;
+            s.onload = res;
+            s.onerror = () => rej(new Error('widget script failed to load — is the Docker stack up?'));
+            document.body.appendChild(s);
+          });
+          for (let i = 0; i < 40 && !window.DograhWidget; i++) await new Promise(r => setTimeout(r, 250));
+          if (!window.DograhWidget) throw new Error('widget loaded but DograhWidget API missing');
+          try { // best-effort transcript mirror — shape varies by widget version
+            window.DograhWidget.onMessage((m) => {
+              if (!m) return;
+              if (typeof m === 'string') { addLine('agent', m); return; }
+              const text = (typeof m.text === 'string' && m.text) || (typeof m.transcript === 'string' && m.transcript) || '';
+              if (!text.trim() || (m.type && /metric|rtf-/.test(m.type))) return;
+              const role = (m.role === 'user' || m.speaker === 'user') ? 'caller' : 'agent';
+              addLine(role, text.trim().slice(0, 400));
+            });
+          } catch (e) {}
+        }
+        watchDograhPill();
+        dograhState('loading', 'Free line: connecting…', false, true);
+        window.DograhWidget.start();
+        setStatus('Free line connecting — allow the mic if the browser asks', true);
+      } catch (e) {
+        dograhState('sys', 'Free line: failed', true, false);
+        addLine('agent', '⚠️ Dograh failed: ' + (e.message || e));
+      }
+    });
+    $('dograhEnd').addEventListener('click', () => { try { window.DograhWidget && window.DograhWidget.end(); } catch (e) {} });
+  }).catch(() => {});
+
+  function watchDograhPill() {
+    if (dograhPoll) return;
+    dograhPoll = setInterval(() => {
+      const w = window.DograhWidget;
+      if (!w) return;
+      // find the floating pill by its short lifecycle label (not our buttons)
+      const el = [...document.querySelectorAll('button,a,div[role=button]')].find(e => {
+        const t = (e.textContent || '').trim().toLowerCase();
+        return t.length > 3 && t.length < 24 && /^(connecting|end call|retry|talk to agent)/.test(t);
+      });
+      const t = el ? (el.textContent || '').trim().toLowerCase() : '';
+      if (/^end call/.test(t)) {
+        if (!dograhActive) {
+          dograhActive = true;
+          if (micSession) { micSession = false; clearTimeout(restartTimer); clearTimeout(submitTimer); try { recog && recog.stop(); } catch (e) {} updateMicVisual(); }
+          dograhState('kokoro', 'Free line: LIVE', false, true);
+          addLine('agent', '— free line connected —');
+          setStatus('Free line live — just talk', true);
+        }
+      } else if (/^retry|^talk to agent/.test(t)) {
+        if (dograhActive) {
+          dograhActive = false;
+          dograhState('', 'Free line: ended', true, false);
+          addLine('agent', '— free line ended —');
+          setStatus('Call ended', false);
+        }
+      }
+    }, 800);
+  }
+
   // ── push-to-talk: hold the mic, release to send ────────────────────
   // The open line stays for desktop; phones (or by choice) get hold-to-talk:
   // press = listen, release = send & reply. Pointer events + touch-action:none
@@ -641,6 +747,11 @@
     if (vapiActive) {                 // pro line: unmute while held
       try { vapi.setMuted(false); } catch (e) {}
       setStatus('Pro line open — speak now, release when done', true);
+      return;
+    }
+    if (dograhActive) {               // free line: it listens on its own
+      setStatus('Free line is live — it listens on its own (use its End Call pill to stop)', true);
+      pttActive = false; updateMicVisual();
       return;
     }
     if (!SR) { pttActive = false; updateMicVisual(); micError('This browser has no speech recognition — use the text box or the pro line.'); return; }

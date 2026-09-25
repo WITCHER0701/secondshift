@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dograh widget test — SecondShift</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:20px}
+  h1{font-size:1.4rem}
+  p{color:#8b949e;max-width:420px}
+  .pill{display:inline-block;background:#10b981;color:#04231a;padding:6px 14px;border-radius:999px;font-size:.85rem;font-weight:600}
+</style>
+</head>
+<body>
+  <span class="pill">Dograh widget test</span>
+  <h1>Tap the green button, bottom-right</h1>
+  <p>The floating voice widget connects to the self-hosted Dograh agent. Speak after connecting — replies play through your speakers. No Vapi, no credits.</p>
+
+<!-- Dograh Widget -->
+<script>
+  (function(d, s, id) {
+    var js, fjs = d.getElementsByTagName(s)[0];
+    if (d.getElementById(id)) return;
+    js = d.createElement(s); js.id = id;
+    js.src = 'https://los-deaths-customize-painting.trycloudflare.com/embed/dograh-widget.js?token=emb_76_eMVoBFSOUCDLeagx6n-74rsBPY-pZ4nmTAvR--oY&environment=local&apiEndpoint=https://connected-others-excellent-profit.trycloudflare.com';
+    js.setAttribute('data-dograh-context', JSON.stringify({
+      page_url: window.location.href,
+      today: new Date().toISOString().slice(0, 10)
+    }));
+    js.async = true;
+    fjs.parentNode.insertBefore(js, fjs);
+  }(document, 'script', 'dograh-widget'));
+</script>
+</body>
+</html>

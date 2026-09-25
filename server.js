@@ -185,6 +185,19 @@ app.post('/vapi/chat/completions', (req, res) => {
 app.get('/api/vapi/ping', (req, res) => {
   res.json({ ok: true, bridgeHits: vapiBridgeStats.hits, lastHitAt: vapiBridgeStats.lastAt, lastReply: vapiBridgeStats.lastReply });
 });
+
+// ── Dograh widget config (public) ──────────────────────────────
+// Self-hosted Dograh (Docker on this PC) replaces the Vapi pro line for the
+// website tester. Tunnels are trycloudflare quick tunnels: their URLs change
+// whenever the Docker stack restarts, so voice.html reads them from here
+// (DOGRAH_UI_URL / DOGRAH_API_URL in the local .env) instead of hardcoding.
+app.get('/api/dograh/config', (req, res) => {
+  const token = process.env.DOGRAH_EMBED_TOKEN || '';
+  const ui = (process.env.DOGRAH_UI_URL || '').replace(/\/$/, '');
+  const api = (process.env.DOGRAH_API_URL || '').replace(/\/$/, '');
+  if (!token || !ui || !api) return res.json({ configured: false });
+  res.json({ configured: true, token, uiUrl: ui, apiUrl: api });
+});
 app.get('/api/voice/appointments', requireAdmin, (req, res) => res.json({ appointments: store.listAppointments().slice(0, 50) }));
 app.get('/api/voice/session/:id', (req, res) => {
   const s = store.listCalls().find((c) => c.id === req.params.id);
