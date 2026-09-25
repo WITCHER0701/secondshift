@@ -63,6 +63,11 @@
   .ptt-pill { border: 1px solid var(--line-strong); background: var(--bg-raise); color: var(--text-2); border-radius: 99px; padding: 7px 14px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
   .ptt-pill.on { border-color: var(--accent); color: var(--accent); background: rgba(41, 151, 255, .1); }
   #micBtn { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .mic-big.dograh { background: radial-gradient(circle at 32% 30%, #34d399, #10b981 60%, #059669); box-shadow: 0 0 0 8px rgba(16,185,129,.14), 0 14px 44px rgba(16,185,129,.35); }
+  .mic-big.dograh svg { opacity: .92; }
+  /* the widget's own floating pill duplicates this page's controls — hide it here; */
+  /* the Free-line box below is the single start/end surface */
+  #dograh-widget-root { display: none !important; }
 </style>
   <meta property="og:title" content="SecondShift — business automations that work after close">
   <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
@@ -146,7 +151,7 @@
           <div class="vb-row" style="justify-content:space-between">
             <span class="vb-title"><span id="dograhDot" class="vb-dot"></span> <span id="dograhLabel">Free line: Dograh · not configured</span></span>
           </div>
-          <p class="dim" id="dograhHint" style="font-size:11.5px;margin:8px 0 0;line-height:1.55">Free &amp; unlimited: a self-hosted <b>Dograh</b> agent (open-source, runs on our own server) takes the call — no Vapi credits, no per-minute billing. Needs the Docker stack up; if this stays gray, the tunnel URLs in .env need a refresh.</p>
+          <p class="dim" id="dograhHint" style="font-size:11.5px;margin:8px 0 0;line-height:1.55">Free &amp; unlimited: a self-hosted <b>Dograh</b> agent (open-source, runs on our own server) takes the call — no Vapi credits, no per-minute billing. Offline right now? Start the Docker stack, refresh the tunnel URLs in .env, reload.</p>
           <div class="vb-row" style="gap:8px;margin-top:10px">
             <button id="dograhStart" class="btn btn-primary btn-sm" style="flex:1;display:none">🎙 Talk on the free line</button>
             <button id="dograhEnd" class="btn btn-ghost btn-sm" style="flex:1;display:none">Hang up</button>
@@ -624,6 +629,8 @@
   // future-proofing that stays silent today.
   let dograhActive = false;
   let dograhPoll = null;
+  let dograhConnectAt = 0;
+  let dograhSlowWarned = false;
   const dograhDot = $('dograhDot'), dograhLabel = $('dograhLabel'), dograhHint = $('dograhHint');
   function dograhState(dot, label, showStart, showEnd) {
     dograhDot.className = 'vb-dot' + (dot ? ' ' + dot : '');
@@ -631,11 +638,17 @@
     $('dograhStart').style.display = showStart ? '' : 'none';
     $('dograhEnd').style.display = showEnd ? '' : 'none';
   }
+  function setMicDograh(on) { // the big mic yields to the free line while it's live
+    const mic = $('micBtn');
+    if (mic) mic.classList.toggle('dograh', !!on);
+  }
   fetch('/api/dograh/config').then(r => r.json()).then((cfg) => {
     if (!cfg.configured) return; // stays gray with the hint
     dograhHint.innerHTML = 'Free &amp; unlimited — the call runs to <b>our own Dograh server</b> (self-hosted, open-source). The agent greets, listens and replies on its own; this page just mirrors the call here. No credits, no meter.';
     dograhState('', 'Free line: Dograh · ready', true, false);
     $('dograhStart').addEventListener('click', async () => {
+      if (dograhActive) return; // already live — one call at a time
+      if (vapiActive) { addLine('agent', '⚠️ Hang up the pro line first — one line at a time.'); return; }
       try {
         if (micSession) { // never two listeners at once
           micSession = false; clearTimeout(restartTimer); clearTimeout(submitTimer);
@@ -669,11 +682,13 @@
           } catch (e) {}
         }
         watchDograhPill();
+        dograhConnectAt = Date.now(); dograhSlowWarned = false;
         dograhState('loading', 'Free line: connecting…', false, true);
         window.DograhWidget.start();
         setStatus('Free line connecting — allow the mic if the browser asks', true);
       } catch (e) {
-        dograhState('sys', 'Free line: failed', true, false);
+        dograhState('sys', 'Free line: unreachable', true, false);
+        dograhHint.innerHTML = '⚠️ Couldn\'t reach the free line (' + String(e.message || e).slice(0, 120) + '). Start the Dograh Docker stack, refresh the tunnel URLs in <code>.env</code>, then reload this page.';
         addLine('agent', '⚠️ Dograh failed: ' + (e.message || e));
       }
     });
@@ -685,16 +700,31 @@
     dograhPoll = setInterval(() => {
       const w = window.DograhWidget;
       if (!w) return;
-      // find the floating pill by its short lifecycle label (not our buttons)
-      const el = [...document.querySelectorAll('button,a,div[role=button]')].find(e => {
-        const t = (e.textContent || '').trim().toLowerCase();
-        return t.length > 3 && t.length < 24 && /^(connecting|end call|retry|talk to agent)/.test(t);
-      });
-      const t = el ? (el.textContent || '').trim().toLowerCase() : '';
+      // the pill has a stable id — read it directly, fall back to a text scan
+      let t = '';
+      const cta = document.getElementById('dograh-widget-cta');
+      if (cta) t = (cta.textContent || '').trim().toLowerCase();
+      else {
+        const el = [...document.querySelectorAll('button,a,div[role=button]')].find(e => {
+          const s = (e.textContent || '').trim().toLowerCase();
+          return s.length > 3 && s.length < 24 && /^(connecting|end call|retry|talk to agent)/.test(s);
+        });
+        t = el ? (el.textContent || '').trim().toLowerCase() : '';
+      }
+      if (/^connecting/.test(t) && !dograhActive) {
+        dograhState('loading', 'Free line: connecting…', false, true);
+        const waited = Date.now() - dograhConnectAt;
+        if (waited > 20000 && !dograhSlowWarned) {
+          dograhSlowWarned = true;
+          addLine('agent', '— still connecting after 20s… on mobile data? The tunnel URLs must be current (see VOICE-DOGRAH.md) —');
+        }
+        return;
+      }
       if (/^end call/.test(t)) {
         if (!dograhActive) {
           dograhActive = true;
           if (micSession) { micSession = false; clearTimeout(restartTimer); clearTimeout(submitTimer); try { recog && recog.stop(); } catch (e) {} updateMicVisual(); }
+          setMicDograh(true);
           dograhState('kokoro', 'Free line: LIVE', false, true);
           addLine('agent', '— free line connected —');
           setStatus('Free line live — just talk', true);
@@ -702,6 +732,7 @@
       } else if (/^retry|^talk to agent/.test(t)) {
         if (dograhActive) {
           dograhActive = false;
+          setMicDograh(false);
           dograhState('', 'Free line: ended', true, false);
           addLine('agent', '— free line ended —');
           setStatus('Call ended', false);
