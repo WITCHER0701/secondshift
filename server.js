@@ -11,6 +11,8 @@
  */
 const express = require('express');
 const session = require('express-session');
+const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
@@ -35,6 +37,20 @@ const RAW_PORT = process.env.PORT;
 const PORT = (RAW_PORT && parseInt(RAW_PORT, 10) > 0) ? parseInt(RAW_PORT, 10) : 4000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'lab-admin-2026';
 const ADMIN_PASSWORD_IS_DEFAULT = !process.env.ADMIN_PASSWORD;
+if (ADMIN_PASSWORD_IS_DEFAULT) {
+  console.warn('⚠️  ADMIN_PASSWORD not set — using the public default. Anyone can open your admin dashboard. Set ADMIN_PASSWORD in .env / Render env.');
+}
+// constant-time compare: password checks shouldn't leak length/timing hints
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) {
+    // still burn comparable time before failing
+    crypto.timingSafeEqual(Buffer.alloc(32), Buffer.alloc(32));
+    return false;
+  }
+  return crypto.timingSafeEqual(ab, bb);
+}
 
 // behind Render's proxy, req.ip/protocol come from X-Forwarded-* headers
 app.set('trust proxy', 1);
@@ -46,8 +62,49 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'automationlab-dev-secret',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 3600 * 1000 },
+  cookie: {
+    maxAge: 7 * 24 * 3600 * 1000,
+    httpOnly: true,               // no document.cookie access from JS
+    sameSite: 'lax',              // CSRF baseline; cross-site POSTs drop the cookie
+    secure: process.env.NODE_ENV === 'production' || process.env.RENDER === 'true',
+  },
 }));
+
+// ── rate limits: the site is public; abusive clients must not be able to ─
+// brute-force the admin password or balloon the JSON store with junk writes.
+const isProd = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+const loginLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts — try again in 10 minutes.' },
+});
+const writeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 40,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests — slow down a little.' },
+});
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests.' },
+});
+app.use('/api/', apiLimiter);
+// (login limiter lives on the route itself — mounting it here too would double-count every attempt)
+
+// basic hardening headers (kept minimal so inline scripts/styles keep working)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
+  next();
+});
 // HTML must always revalidate (etag → 304 when unchanged, fresh when edited);
 // hashed/static assets can cache. Prevents visitors getting stale pages.
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -83,7 +140,7 @@ app.post('/api/testdrive', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/deals', (req, res) => {
+app.post('/api/deals', writeLimiter, (req, res) => {
   const { name, email, company, industry, automationSlugs, message, monthlyBudget, timeline } = req.body || {};
   const errors = [];
   if (!name || String(name).trim().length < 2) errors.push('Please tell us your name.');
@@ -99,7 +156,7 @@ app.post('/api/deals', (req, res) => {
 });
 
 // ── voice agent (The Voice) ───────────────────────────────────
-app.post('/api/voice/start', (req, res) => {
+app.post('/api/voice/start', writeLimiter, (req, res) => {
   const session = voice.newSession({ channel: (req.body && req.body.channel) || 'web', userAgent: (req.get('user-agent') || '').slice(0, 120) });
   store.saveCall(session);
   store.addEvent('call_started', { callId: session.id });
@@ -110,7 +167,7 @@ app.post('/api/voice/start', (req, res) => {
   res.json({ ok: true, callId: session.id, reply });
 });
 
-app.post('/api/voice/turn', async (req, res) => {
+app.post('/api/voice/turn', writeLimiter, async (req, res) => {
   const { callId, text } = req.body || {};
   if (!callId || !text) return res.status(400).json({ error: 'callId and text required' });
   const calls = store.listCalls();
@@ -207,7 +264,7 @@ app.get('/api/voice/session/:id', (req, res) => {
 
 // ── First Response (lead responder) ───────────────────────────
 // A lead arrives: instant reply is generated and the qualification thread starts.
-app.post('/api/leads/respond', (req, res) => {
+app.post('/api/leads/respond', writeLimiter, (req, res) => {
   const { raw, source } = req.body || {};
   if (!raw || !String(raw).trim()) return res.status(400).json({ error: 'raw lead text required' });
   const started = Date.now();
@@ -215,7 +272,7 @@ app.post('/api/leads/respond', (req, res) => {
   store.addEvent('lead_responded', { leadId: session.id, source: session.source });
   res.json({ ok: true, id: session.id, reply: session.reply || null, lead: session.lead });
 });
-app.post('/api/leads/turn', (req, res) => {
+app.post('/api/leads/turn', writeLimiter, (req, res) => {
   const { leadId, text } = req.body || {};
   if (!leadId || !text) return res.status(400).json({ error: 'leadId and text required' });
   const r = responder.turn(leadId, String(text).slice(0, 1000));
@@ -230,7 +287,7 @@ app.get('/api/leads/thread/:id', (req, res) => {
 app.get('/api/leads/threads', requireAdmin, (req, res) => res.json({ leads: store.listLeadRecords().slice(0, 50) }));
 
 // ── Content Crew ──────────────────────────────────────────────
-app.post('/api/content/generate', (req, res) => {
+app.post('/api/content/generate', writeLimiter, (req, res) => {
   const { business, subject, vibe, city, offer } = req.body || {};
   if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'subject required — what did you photograph?' });
   const gen = content.generate({ business, subject, vibe, city, offer });
@@ -246,10 +303,14 @@ function requireAdmin(req, res, next) {
   res.status(401).json({ error: 'Unauthorized' });
 }
 
-app.post('/admin/login', (req, res) => {
-  if (String(req.body.password || '') !== ADMIN_PASSWORD) return res.status(401).json({ error: 'Wrong password' });
-  req.session.admin = true;
-  res.json({ ok: true });
+app.post('/admin/login', loginLimiter, (req, res) => {
+  if (!safeEqual(String(req.body.password || ''), ADMIN_PASSWORD)) return res.status(401).json({ error: 'Wrong password' });
+  // regenerate: a session id handed out pre-auth must never survive login
+  req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: 'session error' });
+    req.session.admin = true;
+    res.json({ ok: true });
+  });
 });
 app.post('/admin/logout', (req, res) => req.session.destroy(() => res.json({ ok: true })));
 app.get('/admin/api/leads', requireAdmin, (req, res) => res.json({ leads: store.listLeads() }));
