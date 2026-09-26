@@ -99,8 +99,8 @@ app.use('/api/', apiLimiter);
 
 // basic hardening headers (kept minimal so inline scripts/styles keep working)
 app.use((req, res, next) => {
-  // banner is fetched cross-origin (LinkedIn tab) for the profile upload flow
-  if (req.path === '/linkedin-banner-logo.png') res.setHeader('Access-Control-Allow-Origin', '*');
+  // brand images fetched cross-origin (LinkedIn tab) for the upload flows
+  if (req.path === '/linkedin-banner-logo.png' || req.path === '/company-logo.png') res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
