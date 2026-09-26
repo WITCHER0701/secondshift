@@ -251,6 +251,17 @@ app.get('/linkedin-banner-logo.png', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'linkedin-banner-logo.png'));
 });
 
+// ── Keep-alive: Render free tier sleeps after ~15 idle min; a cold brain
+// takes 50-60s to wake, but Vapi's custom-LLM gives up after ~30s — the pro
+// line goes silent on the first turn of a cold call. Self-ping every 9 min
+// keeps this service (the brain) warm. Render sets RENDER=true automatically.
+if (process.env.RENDER) {
+  const SELF = process.env.RENDER_EXTERNAL_URL || 'https://secondshift-gwv6.onrender.com';
+  setInterval(() => {
+    fetch(SELF + '/healthz').catch(() => {});
+  }, 9 * 60 * 1000).unref();
+}
+
 // ── Dograh widget config (public) ──────────────────────────────
 // Self-hosted Dograh (Docker on the owner's PC) powers the free line. The
 // trycloudflare quick-tunnel URLs change whenever the tunnels restart, so the
