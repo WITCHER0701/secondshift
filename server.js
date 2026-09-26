@@ -244,14 +244,27 @@ app.get('/api/vapi/ping', (req, res) => {
 });
 
 // ── Dograh widget config (public) ──────────────────────────────
-// Self-hosted Dograh (Docker on this PC) replaces the Vapi pro line for the
-// website tester. Tunnels are trycloudflare quick tunnels: their URLs change
-// whenever the Docker stack restarts, so voice.html reads them from here
-// (DOGRAH_UI_URL / DOGRAH_API_URL in the local .env) instead of hardcoding.
+// Self-hosted Dograh (Docker on the owner's PC) powers the free line. The
+// trycloudflare quick-tunnel URLs change whenever the tunnels restart, so the
+// current endpoints live in public/dograh-endpoints.json (tracked in git — the
+// repo is public; the embed token is public-by-design, it ships in the page
+// DOM anyway). scripts/dograh-watchdog.js keeps that file fresh: it restarts
+// dead tunnels, writes the new URLs, and pushes so the next Render deploy
+// picks them up. Resolution order: tracked file first, then .env (local dev
+// override), so a stale deployed file can never win over a live local one.
+function readDograhEndpoints() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'public', 'dograh-endpoints.json'), 'utf8');
+    const j = JSON.parse(raw);
+    if (j && j.token && j.uiUrl && j.apiUrl) return { token: j.token, uiUrl: j.uiUrl.replace(/\/$/, ''), apiUrl: j.apiUrl.replace(/\/$/, '') };
+  } catch (e) { /* file missing/malformed — fall through to env */ }
+  return null;
+}
 app.get('/api/dograh/config', (req, res) => {
-  const token = process.env.DOGRAH_EMBED_TOKEN || '';
-  const ui = (process.env.DOGRAH_UI_URL || '').replace(/\/$/, '');
-  const api = (process.env.DOGRAH_API_URL || '').replace(/\/$/, '');
+  const file = readDograhEndpoints();
+  const token = (file && file.token) || process.env.DOGRAH_EMBED_TOKEN || '';
+  const ui = (file && file.uiUrl) || (process.env.DOGRAH_UI_URL || '').replace(/\/$/, '');
+  const api = (file && file.apiUrl) || (process.env.DOGRAH_API_URL || '').replace(/\/$/, '');
   if (!token || !ui || !api) return res.json({ configured: false });
   res.json({ configured: true, token, uiUrl: ui, apiUrl: api });
 });

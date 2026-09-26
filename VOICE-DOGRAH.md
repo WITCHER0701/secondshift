@@ -19,11 +19,12 @@ not in this repo.
   (`docker-compose.yaml` + generated `.env` + `scripts/` + `deploy/`)
 - **UI:** http://localhost:3010 (login: the account you created on first run)
 - **Agent:** "SecondShift automation service tester - inbound" (workflow 1)
-- **Embed token:** `DOGRAH_EMBED_TOKEN` in `automation-lab/.env`
-- **Site integration:** `/api/dograh/config` on this server reads
-  `DOGRAH_EMBED_TOKEN` / `DOGRAH_UI_URL` / `DOGRAH_API_URL` from `.env`;
-  voice.html's green **Free line** box boots the widget from those values.
-  Keep the token secret-ish: anyone with it can host your agent's widget.
+- **Embed token:** `public/dograh-endpoints.json` (tracked) / `DOGRAH_EMBED_TOKEN` in `.env`
+- **Site integration:** `/api/dograh/config` resolves endpoints **from
+  `public/dograh-endpoints.json` first, then `.env`** (local override wins).
+  The JSON file is tracked in git so Render deploys the current URLs; the
+  repo is public and the token is public-by-design (it ships in the page DOM).
+  `scripts/dograh-watchdog.js` keeps the file fresh — see below.
 
 ## Local quirks fixed in this install (don't lose these)
 
@@ -59,21 +60,40 @@ Test locally: open http://localhost:4000/voice.html → green **Talk on the
 free line** button. From the phone on the same Wi-Fi:
 `http://192.168.1.76:4000/voice.html`.
 
-## Quick tunnels change URL on every restart ⚠️
+## Tunnel URLs self-heal — the watchdog
 
-The public URLs are trycloudflare **quick tunnels** (ephemeral). After every
-stack restart, refresh both in `automation-lab/.env`, then restart the site
-server:
+The public URLs are trycloudflare **quick tunnels** (ephemeral): they rotate
+whenever the tunnels restart, which used to break the live line until someone
+manually refreshed `.env`. **`scripts/dograh-watchdog.js` now automates it**:
+
+- Windows scheduled task **`DograhTunnelWatchdog`** runs it every 5 minutes
+  (`schtasks //Query //TN DograhTunnelWatchdog`; logs → `watchdog.log`).
+- Each run health-checks the API tunnel URL from `public/dograh-endpoints.json`.
+- If dead: restarts `cloudflared-tunnel` + `dograh-ui-tunnel`, reads the new
+  URLs from the container logs, rewrites the JSON file **and `.env`**, then
+  commits + pushes — Render auto-deploys the fresh endpoints within ~1 min.
+- Tested: planted a dead URL → watchdog detected it, healed, pushed
+  (commit `471e1c5`). Healthy runs are no-ops (no commits).
+
+Run it manually any time:
 
 ```bash
-docker logs cloudflared-tunnel | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1  # → DOGRAH_API_URL
-docker logs dograh-ui-tunnel    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | head -1  # → DOGRAH_UI_URL
+cd "/d/my LLM/.n8n-files/website/secondshift" && node scripts/dograh-watchdog.js
 ```
 
-**From the internet (phone on mobile data, real visitors), calls will not
-connect** unless the PC is reachable AND the tunnel URLs in .env are current.
-Stable fix when you want it: a named Cloudflare tunnel on a hostname you own
-(then set the URLs once and never again), or a small VPS running the stack.
+**Limits of the free setup (be honest with yourself):**
+
+1. **The PC must be on** for the free line to work at all. PC off → live-site
+   visitors see the gray "offline" state; the free mic + Vapi lines keep working.
+2. **Visitors on your Wi-Fi** connect fine (TURN host = `192.168.1.76`).
+   **Visitors on mobile data / other networks** additionally need the router
+   to forward **UDP 3478** to this PC (static NAT rule: external 3478/udp →
+   192.168.1.76:3478). The public IPv4 here is real (not CGNAT — 38.137.51.45),
+   so one port-forward finishes this. Until then, tunnel URLs alone are not
+   enough for outside callers — WebRTC media can't reach coturn.
+3. Quick-tunnel URLs rotate on tunnel restarts; the watchdog heals them
+   within ≤5 min + Render deploy time (~1 min). A **named Cloudflare tunnel**
+   on your own domain removes even that gap.
 
 ## Where transcripts go
 
