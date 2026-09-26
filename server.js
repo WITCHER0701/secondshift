@@ -99,6 +99,8 @@ app.use('/api/', apiLimiter);
 
 // basic hardening headers (kept minimal so inline scripts/styles keep working)
 app.use((req, res, next) => {
+  // banner is fetched cross-origin (LinkedIn tab) for the profile upload flow
+  if (req.path === '/linkedin-banner-logo.png') res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -241,6 +243,12 @@ app.post('/vapi/chat/completions', (req, res) => {
 // public: lets voice.html (and you) verify whether Vapi reached the brain
 app.get('/api/vapi/ping', (req, res) => {
   res.json({ ok: true, bridgeHits: vapiBridgeStats.hits, lastHitAt: vapiBridgeStats.lastAt, lastReply: vapiBridgeStats.lastReply });
+});
+
+// Banner file with permissive CORS so the LinkedIn tab can fetch it for upload
+app.get('/linkedin-banner-logo.png', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.sendFile(path.join(__dirname, 'public', 'linkedin-banner-logo.png'));
 });
 
 // ── Dograh widget config (public) ──────────────────────────────
