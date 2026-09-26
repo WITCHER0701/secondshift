@@ -1,7 +1,7 @@
 {
   "name": "secondshift",
   "version": "1.0.0",
-  "description": "SecondShift \u00e2\u20ac\u201d AI automations for local business, built by Rishi Raj Singh. Watch the shift work, then hire it.",
+  "description": "SecondShift â€” AI automations for local business, built by Rishi Raj Singh. Watch the shift work, then hire it.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,6 +9,7 @@
     "seed": "node scripts/seed.js"
   },
   "dependencies": {
+    "@codebuff/sdk": "^0.10.7",
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.0",
     "express-session": "^1.19.0",

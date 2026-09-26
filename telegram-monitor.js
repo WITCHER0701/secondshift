@@ -15,9 +15,12 @@
  *
  * Alerts:   uncaughtException / unhandledRejection, any 5xx response, watchdog drift.
  * Watchdog: periodic probes (HTTP routes + data-store) with recovery notices.
- * Commands: long-poll getUpdates → /status, /health, /help (owner only).
+ * Commands: long-poll getUpdates → /status, /health, /diagnose, /fix,
+ *           /agent <task> (owner's Codebuff agent on this PC), /agentstatus, /help.
+ *           /agent runs in the background — the poll loop stays live while it works.
  */
 const path = require('path');
+const agentRunner = require('./agent-runner');
 
 // ── activation ─────────────────────────────────────────────────────────
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -246,6 +249,8 @@ const HELP_TEXT =
   '/health — site routes + data file, probed now\n' +
   '/diagnose — find problems, get one-tap fixes\n' +
   '/fix — run a fix by name\n' +
+  '/agent <task> — my Codebuff agent does it on the PC and reports back\n' +
+  '/agentstatus — what the agent is doing right now\n' +
   '/help — this menu\n' +
   'Alerts: I message you automatically on crashes, 5xx spikes, and watchdog drift — with a Fix button when a safe remedy exists.';
 
@@ -323,9 +328,38 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
       if (!names.length) return reply('No fixes registered yet.');
       return tgCallForm('sendMessage', { chat_id: CHAT_ID, text: '🔧 Available fixes — tap to run:', reply_markup: { inline_keyboard: names.map((n) => [{ text: n, callback_data: 'fix:' + n }]) } }).then((r) => { if (r && r.ok) { state.repliesSent++; state.lastReplyAt = new Date().toISOString(); } });
     }
+    if (cmd === '/agent' || cmd === '/agentstatus') return handleAgent(cmd, text);
     if (cmd === '/help' || cmd === '/start') { state.commands.replies['/help'] = (state.commands.replies['/help'] || 0) + 1; return reply(HELP_TEXT); }
     if (cmd.startsWith('/')) return reply('Unknown command ' + cmd + ' — try /help');
     return null; // plain messages are ignored
+  }
+  // ── /agent: run a task with the headless Codebuff agent on this PC ──
+  // The run is NOT awaited — the command loop stays free for /status etc.
+  // Progress and the final summary arrive as separate chat messages.
+  async function handleAgent(cmd, text) {
+    state.commands.replies[cmd] = (state.commands.replies[cmd] || 0) + 1;
+    const a = agentRunner.status();
+    if (cmd === '/agentstatus') {
+      if (!a.enabled) return reply('Agent runner inactive — no Codebuff auth on the PC (run `npx codebuff login` there).');
+      const lines = [
+        '🤖 Agent runner — model ' + a.model,
+        a.running
+          ? 'State: 🔨 running "' + a.lastTask + '" since ' + String(a.startedAt).slice(11, 19)
+          : 'State: idle',
+        'Runs: ' + a.runs + ' (' + a.failed + ' failed)' + (a.lastDurationMs ? ' · last took ' + Math.round(a.lastDurationMs / 1000) + 's' : ''),
+      ];
+      if (a.lastError) lines.push('Last error: ' + String(a.lastError).slice(0, 160));
+      return reply(lines.join('\n'));
+    }
+    const task = String(text || '').trim().replace(/^\/agent(@\S+)?\s*/i, '');
+    if (!task) return reply('Usage: /agent <task>\nExample: /agent find all TODO comments in server.js and list them');
+    if (!a.enabled) return reply('Agent runner inactive — no Codebuff auth on the PC. Run `npx codebuff login` there first.');
+    if (a.running) return reply('⏳ Already working on "' + a.lastTask + '" — I\'ll report when it finishes. /agentstatus for details.');
+    await reply('🚀 Agent on it — "' + task.slice(0, 140) + '"\nIt reads/edits the repo on the PC, never pushes to git, and I\'ll send the summary here when done.');
+    agentRunner.runTask(task, { onUpdate: (m) => { reply(m).catch(() => {}); } })
+      .then((r) => reply(r.text))
+      .catch((e) => reply('❌ Agent crashed: ' + String((e && e.message) || e).slice(0, 200)));
+    return undefined; // fire-and-forget; loop keeps polling
   }
   (async function loop() {
     while (!stopped && enabled) {

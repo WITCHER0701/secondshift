@@ -30,6 +30,7 @@ const voice = require('./voice-agent');
 const responder = require('./lead-responder');
 const content = require('./content-engine');
 const tmon = require('./telegram-monitor');
+const agentRunner = require('./agent-runner');
 const { seed } = require('./scripts/seed');
 
 const app = express();
@@ -489,7 +490,7 @@ if (require.main === module) {
         return issues;
       },
     });
-    console.log('[monitor] ✔ Telegram monitor live — alerts + /status /health /diagnose /fix on your chat');
+    console.log('[monitor] ✔ Telegram monitor live — alerts + /status /health /diagnose /fix /agent <task> on your chat');
 
     // ── safe one-tap fixes (registered BEFORE startCommands so buttons route) ──
     tmon.registerFix('reseed-data', async () => {
@@ -513,6 +514,12 @@ if (require.main === module) {
       const txt = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
       if (!r.ok || !txt) throw new Error('HTTP ' + r.status + ' — brain did not reply');
       return { message: '✅ Brain replied in ' + (Date.now() - t0) + 'ms: "' + String(txt).slice(0, 120) + '"' };
+    });
+    tmon.registerFix('test-agent', async () => {
+      if (!agentRunner.enabled) throw new Error('no Codebuff auth on the PC — run `npx codebuff login` there');
+      const r = await agentRunner.runTask('Health ping: reply with exactly AGENT-OK and nothing else. Do not read or modify any files.', {});
+      if (!r.ok) throw new Error(String(r.text).replace(/^❌ Agent failed: /, ''));
+      return { message: '✅ Agent replied in ' + Math.round((r.durationMs || 0) / 1000) + 's — headless Codebuff relay working.' };
     });
   } else {
     console.log('[monitor] Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — running without remote eyes');
