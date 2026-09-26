@@ -195,13 +195,59 @@ function startWatchdog({ intervalMs = 5 * 60 * 1000, probes = [], firstDelayMs =
   unref(setInterval(() => { tick().catch(() => {}); }, intervalMs));
 }
 
+// ── one-tap fix actions (inline keyboards) ─────────────────────────────
+// Safety model: actions are REMEDIATION (restart/recover/clear), never code
+// edits. Code bugs are diagnosed and located by the bot, but fixed by the
+// owner + agent working together — a chat button must never rewrite code.
+let fixHandlers = {};
+/** registerFix(name, fn) — server registers safe remediation actions. */
+function registerFix(name, fn) { fixHandlers[name] = fn; }
+
+async function tgCallForm(method, payload, timeoutMs = 20000) {
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(TG_API + '/bot' + TOKEN + '/' + method, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ac.signal,
+    });
+    return await res.json().catch(() => ({}));
+  } finally { clearTimeout(to); }
+}
+
+async function answerCallback(id, text) {
+  const r = await tgCallForm('answerCallbackQuery', { callback_query_id: id, text: String(text).slice(0, 190) }).catch(() => ({}));
+  return r && r.ok;
+}
+
+async function alertWithFix(text, fix, key, minGapMs) {
+  // deduped alert that carries a one-tap Fix button (fix = registered name)
+  const now = Date.now();
+  if (minuteBucket.minute !== currentMinute()) minuteBucket = { minute: currentMinute(), count: 0 };
+  if (++minuteBucket.count > MAX_SENDS_PER_MIN) { state.dropped++; return { sent: false, skipped: 'rate-cap' }; }
+  const gap = minGapMs || DEDUP_DEFAULT_MS;
+  const last = dedupMap.get(key) || 0;
+  if (now - last < gap) return { sent: false, skipped: 'dedup' };
+  dedupMap.set(key, now);
+  const kb = fix ? { inline_keyboard: [[{ text: '🔧 Fix: ' + fix, callback_data: 'fix:' + fix }]] } : undefined;
+  const r = await tgCallForm('sendMessage', { chat_id: CHAT_ID, text: String(text).slice(0, MSG_MAX), reply_markup: kb }).catch((e) => ({ ok: false, description: String(e) }));
+  if (r && r.ok) { state.alertsSent++; state.lastAlertAt = new Date().toISOString(); }
+  return r && r.ok ? { sent: true } : { sent: false, error: r && r.description };
+}
+
+// fix:xxx callback routing + /fix menu + /diagnose are wired in startCommands
+
 // ── command bot (long-poll getUpdates) ─────────────────────────────────
 const HELP_TEXT =
   '🤖 SecondShift monitor — commands\n' +
   '/status — live business numbers (leads, clients, MRR, calls…)\n' +
   '/health — site routes + data file, probed now\n' +
+  '/diagnose — find problems, get one-tap fixes\n' +
+  '/fix — run a fix by name\n' +
   '/help — this menu\n' +
-  'Alerts: I message you automatically on crashes, 5xx spikes, and watchdog drift.';
+  'Alerts: I message you automatically on crashes, 5xx spikes, and watchdog drift — with a Fix button when a safe remedy exists.';
 
 function pad(n) { return String(n).padStart(2, '0'); }
 function clock(d = new Date()) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
@@ -232,11 +278,22 @@ function formatHealth(results) {
  * getSnapshot(): plain object of business counters (server injects from data-store).
  * runHealth(): async → [{ name, ok, detail?, ms? }]
  */
-function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], pollPauseMs = 500 } = {}) {
+function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], runDiagnose = async () => [], pollPauseMs = 500 } = {}) {
   if (!enabled) return;
   state.commands.running = true;
   let offset = 0;
   const reply = (text) => send(text, { force: true });
+  async function handleFix(name) {
+    const fn = fixHandlers[name];
+    if (!fn) return reply('❓ No fix registered as "' + name + '" — try /fix');
+    await reply('🔧 Running fix: ' + name + '…');
+    try {
+      const r = await fn();
+      return reply(r && r.message ? r.message : '✅ Fix "' + name + '" done.');
+    } catch (e) {
+      return reply('❌ Fix "' + name + '" failed: ' + String((e && e.message) || e).slice(0, 250));
+    }
+  }
   async function handle(text) {
     const cmd = String(text || '').trim().split(/[\s@]/)[0].toLowerCase();
     state.commands.lastCommandAt = new Date().toISOString();
@@ -246,6 +303,26 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], p
       try { return reply(formatHealth(await runHealth())); }
       catch (e) { return reply('🩺 /health failed: ' + String((e && e.message) || e).slice(0, 200)); }
     }
+    if (cmd === '/diagnose') {
+      state.commands.replies['/diagnose'] = (state.commands.replies['/diagnose'] || 0) + 1;
+      try {
+        const found = await runDiagnose();
+        if (!found.length) return reply('🧘 Diagnose — ' + clock() + ' · no problems found. All probes healthy, data intact, tunnels alive.');
+        const lines = ['🧘 Diagnose — ' + clock() + ' · ' + found.length + ' issue' + (found.length > 1 ? 's' : '') + ':'];
+        const kb = { inline_keyboard: [] };
+        for (const f of found) {
+          lines.push('• ' + f.problem + (f.detail ? '\n  ' + f.detail : ''));
+          if (f.fix && fixHandlers[f.fix]) kb.inline_keyboard.push([{ text: '🔧 Fix: ' + f.fix, callback_data: 'fix:' + f.fix }]);
+        }
+        return tgCallForm('sendMessage', { chat_id: CHAT_ID, text: lines.join('\n').slice(0, MSG_MAX), reply_markup: kb.inline_keyboard.length ? kb : undefined }).then((r) => { if (r && r.ok) { state.repliesSent++; state.lastReplyAt = new Date().toISOString(); } });
+      } catch (e) { return reply('🧘 /diagnose failed: ' + String((e && e.message) || e).slice(0, 200)); }
+    }
+    if (cmd === '/fix') {
+      state.commands.replies['/fix'] = (state.commands.replies['/fix'] || 0) + 1;
+      const names = Object.keys(fixHandlers);
+      if (!names.length) return reply('No fixes registered yet.');
+      return tgCallForm('sendMessage', { chat_id: CHAT_ID, text: '🔧 Available fixes — tap to run:', reply_markup: { inline_keyboard: names.map((n) => [{ text: n, callback_data: 'fix:' + n }]) } }).then((r) => { if (r && r.ok) { state.repliesSent++; state.lastReplyAt = new Date().toISOString(); } });
+    }
     if (cmd === '/help' || cmd === '/start') { state.commands.replies['/help'] = (state.commands.replies['/help'] || 0) + 1; return reply(HELP_TEXT); }
     if (cmd.startsWith('/')) return reply('Unknown command ' + cmd + ' — try /help');
     return null; // plain messages are ignored
@@ -254,7 +331,7 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], p
     while (!stopped && enabled) {
       let updates = [];
       try {
-        const j = await tgCall('getUpdates', { timeout: 25, offset, allowed_updates: ['message'] }, 35000);
+        const j = await tgCall('getUpdates', { timeout: 25, offset, allowed_updates: ['message', 'callback_query'] }, 35000);
         updates = (j && j.result) || [];
         state.lastError = null;
       } catch (e) {
@@ -265,6 +342,14 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], p
       for (const u of updates) {
         offset = (u.update_id || 0) + 1;
         // owner-only: strangers who find the bot get silence, never business data
+        const cb = u.callback_query;
+        if (cb) {
+          if (String(cb.from && cb.from.id) !== String(CHAT_ID) && String(cb.message && cb.message.chat && cb.message.chat.id) !== String(CHAT_ID)) { answerCallback(cb.id, 'Not authorized').catch(() => {}); continue; }
+          const data = String(cb.data || '');
+          answerCallback(cb.id, 'Running…').catch(() => {});
+          if (data.startsWith('fix:')) { state.commands.lastCommandAt = new Date().toISOString(); handleFix(data.slice(4)).catch(() => {}); }
+          continue;
+        }
         const fromChat = u.message && u.message.chat && String(u.message.chat.id);
         if (!fromChat || fromChat !== String(CHAT_ID)) continue;
         const msg = u.message && u.message.text ? u.message.text : '';
@@ -292,4 +377,4 @@ function status() {
   };
 }
 
-module.exports = { enabled, send, notify5xx, notifyCrash, startWatchdog, startCommands, stop, status, formatStatus, formatHealth, HELP_TEXT };
+module.exports = { enabled, send, notify5xx, notifyCrash, startWatchdog, startCommands, registerFix, alertWithFix, stop, status, formatStatus, formatHealth, HELP_TEXT };

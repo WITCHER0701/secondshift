@@ -478,8 +478,42 @@ if (require.main === module) {
         out.push({ name: 'cloud sync', ok: !(cs.enabled && cs.lastError), detail: cs.enabled ? (cs.lastError ? cs.lastError.slice(0, 60) : cs.provider + ' ok') : 'local mode' });
         return out;
       },
+      // ── one-tap safe remediations (never code edits) ──
+      runDiagnose: async () => {
+        const issues = [];
+        const { count, file } = store.dataFileHealth();
+        if (!(count > 0)) issues.push({ problem: 'Data store ' + (file ? 'unreadable/empty' : 'missing'), fix: 'reseed-data' });
+        const cs = store.cloudStatus();
+        if (cs.enabled && cs.lastError) issues.push({ problem: 'Cloud sync failing', detail: String(cs.lastError).slice(0, 90), fix: 'force-cloud-push' });
+        if (vapiBridgeStats.lastError) issues.push({ problem: 'Vapi bridge erroring', detail: String(vapiBridgeStats.lastError).slice(0, 90), fix: 'test-brain' });
+        return issues;
+      },
     });
-    console.log('[monitor] ✔ Telegram monitor live — alerts + /status /health /help on your chat');
+    console.log('[monitor] ✔ Telegram monitor live — alerts + /status /health /diagnose /fix on your chat');
+
+    // ── safe one-tap fixes (registered BEFORE startCommands so buttons route) ──
+    tmon.registerFix('reseed-data', async () => {
+      const before = store.listEvents(10000).length;
+      seed();
+      const after = store.listEvents(10000).length;
+      return { message: '✅ Data store reseeded (automations restored). Events before/after: ' + before + ' → ' + after + '. Records intact.' };
+    });
+    tmon.registerFix('force-cloud-push', async () => {
+      const r = await store.cloudPushNow();
+      if (r && (r.pushed || r.ok)) return { message: '✅ Force-pushed data to ' + store.cloudStatus().provider + '.' };
+      throw new Error((r && (r.reason || r.error)) || 'push returned no confirmation');
+    });
+    tmon.registerFix('test-brain', async () => {
+      const t0 = Date.now();
+      const r = await fetch('https://secondshift-gwv6.onrender.com/vapi/chat/completions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { type: 'function-call', functionCall: { name: 'getAssistantReply', parameters: { messages: [{ role: 'user', content: 'telegram health ping' }] } } } }),
+      });
+      const j = await r.json().catch(() => ({}));
+      const txt = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+      if (!r.ok || !txt) throw new Error('HTTP ' + r.status + ' — brain did not reply');
+      return { message: '✅ Brain replied in ' + (Date.now() - t0) + 'ms: "' + String(txt).slice(0, 120) + '"' };
+    });
   } else {
     console.log('[monitor] Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — running without remote eyes');
   }
