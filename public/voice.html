@@ -631,6 +631,78 @@
   let dograhPoll = null;
   let dograhConnectAt = 0;
   let dograhSlowWarned = false;
+  // ── live transcript tap for the Dograh free line ──────────────
+  // The widget's voice pipeline streams realtime frames over its signaling
+  // WebSocket (types from RealtimeFeedbackType: rtf-user-transcription with
+  // payload.final, rtf-bot-text) but its page callbacks only cover text-chat
+  // mode — so we tap the socket ourselves: patch window.WebSocket while the
+  // widget boots, catch the /ws/public/signaling/ socket, mirror transcript
+  // frames into the call log, and restore after the socket closes.
+  let dograhTap = { active: false, sockets: new Set(), origWS: null, patchCount: 0 };
+  function dograhHandleFrame(msg) {
+    if (!msg || msg.type !== 'rtf-user-transcription' && msg.type !== 'rtf-bot-text') return;
+    const p = msg.payload || {};
+    const text = String(p.text || '').trim();
+    if (!text || text.length > 400) return;
+    if (msg.type === 'rtf-user-transcription' && p.final === false) return; // interim — wait for final
+    if (/metric|rtf-|secondshift\.space/.test(text)) return; // widget chatter, never conversation
+    const isUser = msg.type === 'rtf-user-transcription';
+    const key = (isUser ? 'u' : 'a') + '|' + text.slice(0, 120).toLowerCase();
+    const now = Date.now();
+    if (dograhTap.lastKey === key && now - dograhTap.lastAt < 3000) return;
+    dograhTap.lastKey = key; dograhTap.lastAt = now;
+    dograhStream(isUser ? 'caller' : 'agent', text);
+  }
+  // The bot streams text word-by-word (rtf chunks), so chunks aggregate into
+  // one bubble per utterance: appended live, finalized after a 1.6s speech gap.
+  dograhTap.buf = { role: null, el: null, text: '', timer: null, lastAt: 0 };
+  function dograhFlushBuf() {
+    const buf = dograhTap.buf;
+    clearTimeout(buf.timer);
+    buf.role = null; buf.el = null; buf.text = ''; buf.lastAt = 0;
+  }
+  function dograhStream(role, text) {
+    const buf = dograhTap.buf;
+    if (buf.role && (buf.role !== role || Date.now() - buf.lastAt > 2500)) dograhFlushBuf();
+    if (!buf.role) {
+      buf.role = role;
+      const d = document.createElement('div');
+      d.className = 'cl-line ' + (role === 'agent' ? 'cl-agent' : 'cl-caller');
+      d.innerHTML = '<div class="cl-who">' + (role === 'agent' ? 'The Voice' : 'You') + '</div><span class="tt"></span>';
+      log.appendChild(d);
+      buf.el = d; buf.text = '';
+    }
+    buf.text += (buf.text && !/\s$/.test(buf.text) ? ' ' : '') + text;
+    buf.el.querySelector('.tt').textContent = buf.text.length > 600 ? '…' + buf.text.slice(-600) : buf.text;
+    buf.lastAt = Date.now();
+    log.scrollTop = log.scrollHeight;
+    clearTimeout(buf.timer);
+    buf.timer = setTimeout(dograhFlushBuf, 1600);
+  }
+  function dograhPatchWS() {
+    if (dograhTap.origWS || typeof WebSocket === 'undefined') return;
+    dograhTap.origWS = window.WebSocket;
+    const Orig = dograhTap.origWS;
+    const handle = dograhHandleFrame;
+    window.WebSocket = function (url, protocols) {
+      const ws = protocols === undefined ? new Orig(url) : new Orig(url, protocols);
+      try {
+        if (String(url || '').includes('/ws/public/signaling/')) {
+          dograhTap.sockets.add(ws);
+          dograhTap.active = true;
+          ws.addEventListener('message', (ev) => {
+            try { const d = JSON.parse(ev.data); handle(d); if (d && d.type) handle(d.payload); } catch (e) {}
+          });
+          ws.addEventListener('close', () => { dograhTap.sockets.delete(ws); if (!dograhTap.sockets.size) { dograhTap.active = false; window.WebSocket = Orig; dograhTap.origWS = null; } });
+        }
+      } catch (e) {}
+      return ws;
+    };
+    try { window.WebSocket.prototype = Orig.prototype; } catch (e) {}
+    ['CONNECTING','OPEN','CLOSING','CLOSED'].forEach((k, i) => { try { window.WebSocket[k] = i; } catch (e) {} });
+    dograhTap.patchCount++;
+  }
+  dograhTap.lastKey = null; dograhTap.lastAt = 0;
   const dograhDot = $('dograhDot'), dograhLabel = $('dograhLabel'), dograhHint = $('dograhHint');
   function dograhState(dot, label, showStart, showEnd) {
     dograhDot.className = 'vb-dot' + (dot ? ' ' + dot : '');
@@ -655,6 +727,7 @@
           try { recog && recog.stop(); } catch (e) {}
           updateMicVisual();
         }
+        dograhPatchWS(); // arm the tap before the widget boots its socket
         if (!window.DograhWidget) {
           dograhState('loading', 'Free line: loading…', false, false);
           // same bootstrap the Dograh dashboard generates, pointed at our tunnels
@@ -723,6 +796,7 @@
       if (/^end call/.test(t)) {
         if (!dograhActive) {
           dograhActive = true;
+          dograhFlushBuf();
           if (micSession) { micSession = false; clearTimeout(restartTimer); clearTimeout(submitTimer); try { recog && recog.stop(); } catch (e) {} updateMicVisual(); }
           setMicDograh(true);
           dograhState('kokoro', 'Free line: LIVE', false, true);
@@ -732,6 +806,7 @@
       } else if (/^retry|^talk to agent/.test(t)) {
         if (dograhActive) {
           dograhActive = false;
+          dograhFlushBuf();
           setMicDograh(false);
           dograhState('', 'Free line: ended', true, false);
           addLine('agent', '— free line ended —');
