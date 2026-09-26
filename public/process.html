@@ -74,7 +74,41 @@
   </div>
 </section>
 
-<!-- FAQ -->
+<!-- FAQ · new to automations? -->
+<section class="section" style="padding-top:20px">
+  <div class="section-head center reveal">
+    <span class="eyebrow">New Here? Start Zero</span>
+    <h2>Never heard of automations? Read this first.</h2>
+  </div>
+  <div style="max-width:760px;margin:0 auto" id="faqBox101"><!-- injected --></div>
+
+  <div class="info-card reveal" style="max-width:760px;margin:26px auto 0">
+    <h3>A hired human vs a SecondShift worker</h3>
+    <div class="table-wrap">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px">
+        <thead>
+          <tr style="text-align:left;color:var(--text-2);font-size:12px;text-transform:uppercase;letter-spacing:.06em">
+            <th style="padding:10px 12px 10px 0"></th>
+            <th style="padding:10px 8px">Hired human</th>
+            <th style="padding:10px 0;color:var(--accent)">SecondShift worker</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Monthly cost</b></td><td style="padding:9px 8px">$3,000+ (salary, taxes, tools)</td><td style="padding:9px 0;color:var(--accent)">$499–$1,200 flat</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Hours</b></td><td style="padding:9px 8px">40/week, breaks, leave</td><td style="padding:9px 0;color:var(--accent)">24/7/365, no breaks</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Speed</b></td><td style="padding:9px 8px">minutes per task</td><td style="padding:9px 0;color:var(--accent)">seconds per task</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Consistency</b></td><td style="padding:9px 8px">varies by day and mood</td><td style="padding:9px 0;color:var(--accent)">identical every time</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Sick days / quitting</b></td><td style="padding:9px 8px">happens</td><td style="padding:9px 0;color:var(--accent)">never</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Scaling up</b></td><td style="padding:9px 8px">hire and train again</td><td style="padding:9px 0;color:var(--accent)">instant, same worker</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td style="padding:9px 12px 9px 0"><b>Best at</b></td><td style="padding:9px 8px">judgment, relationships, taste</td><td style="padding:9px 0;color:var(--accent)">repetition, speed, follow-up</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="dim" style="margin-top:14px;font-size:13.5px">The honest version: a person beats software at judgment and relationships. But everything repetitive — the follow-ups, reminders, data entry, review requests, after-hours replies — is where a machine wins, every single time. SecondShift takes that work so you and your team do the human part.</p>
+  </div>
+</section>
+
+<!-- FAQ · for buyers -->
 <section class="section" style="padding-top:20px">
   <div class="section-head center reveal">
     <span class="eyebrow">Straight Answers</span>
@@ -120,6 +154,14 @@
 <script src="/script.js"></script>
 <script src="/scroll.js"></script>
 <script>
+const FAQ101 = [
+  ['What exactly is an “automation”?', 'Think of it as a software worker you hire once. You show it a repetitive job — “after every finished job, text the customer a review link” or “when someone fills my form, call them back and book a time” — and it does that job the same way every time, in seconds, at 3am included. No desk, no salary, no training.'],
+  ['I don’t use any special software. Can I still use this?', 'If you or your staff have ever replied to a review, sent a quote, confirmed an appointment, or chased an invoice — congratulations, that work is automatable. You don’t need to know any tech: we build the worker, you use it like a simple app on your phone.'],
+  ['How is an automation better than hiring a person for the same work?', 'A person works 40 hours a week and costs $3,000+ a month before taxes. A SecondShift worker does the same job 24/7 for a flat $499–$1,200 a month, replies in seconds instead of minutes, never has a bad day, never quits, and never needs re-training. When your volume doubles, you don’t hire again — the same worker simply does more. The table below shows it side by side.'],
+  ['What can an automation NOT do? (honest answer)', 'It isn’t magic. Negotiating a big contract, reading a room, comforting an upset customer — that needs a human, and pretending otherwise would be a lie. Automations are for the repetitive 80%: follow-ups, reminders, bookings, data entry, review requests. Hand that to the machine, and your people get their time back for the work only they can do.'],
+  ['Will my customers know they’re dealing with a machine?', 'They’ll notice the speed and the consistency — most owners hear “wow, that was fast” more than anything else. The voice sounds natural, messages are written in your business’s words, and if anyone ever asks, your system answers honestly. No pretending to be human.'],
+  ['How do I know it’ll work for MY business?', 'You don’t take it on faith — you watch it. The Test Drive on this site runs the exact same system live, with your own eyes, before you pay anything. See it book a call, answer questions, and reply like it would for your customers. Then decide.'],
+];
 const FAQ = [
   ['Is this really the same system I get?', 'Yes. The test-drive runs the same code path as production. Your install swaps in your branding, your phone number, your accounts and your data — the engine is identical.'],
   ['Who exactly am I working with?', 'Rishi Raj Singh, the automation engineer who built every system on this site. No account managers, no juniors — you brief the builder directly and he builds it.'],
@@ -129,7 +171,8 @@ const FAQ = [
   ['Who owns the data?', 'You do. Every message, every lead, every piece of feedback is exportable and belongs to your business.'],
   ['What if it doesn\u2019t work for my business?', 'The 30-day guarantee: if the automation doesn\u2019t perform as demonstrated on this site, that month is free — and we part as friends if you want out.'],
 ];
-document.getElementById('faqBox').innerHTML = FAQ.map(([q, a], i) => `
+function renderFAQ(list) {
+  return list.map(([q, a], i) => `
   <div class="info-card reveal" style="margin-bottom:14px">
     <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="const b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none'">
       ${q}<span style="color:var(--accent);font-size:1.2rem">+</span>
@@ -137,6 +180,9 @@ document.getElementById('faqBox').innerHTML = FAQ.map(([q, a], i) => `
     <p style="display:${i === 0 ? 'block' : 'none'};margin-top:12px">${a}</p>
   </div>
 `).join('');
+}
+document.getElementById('faqBox101').innerHTML = renderFAQ(FAQ101);
+document.getElementById('faqBox').innerHTML = renderFAQ(FAQ);
 if (window.LabReveal) window.LabReveal.observeAll(document);
 </script>
 </body>
