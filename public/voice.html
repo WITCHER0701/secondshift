@@ -36,7 +36,7 @@
   @keyframes micpulse { 0%,100% { box-shadow: 0 0 0 8px rgba(239,68,68,.12), 0 14px 44px rgba(239,68,68,.4); } 50% { box-shadow: 0 0 0 18px rgba(239,68,68,.05), 0 14px 44px rgba(239,68,68,.4); } }
   .mic-hint { text-align: center; color: var(--text-2); font-size: 13px; margin-top: 14px; }
   .textrow { display: flex; gap: 10px; margin-top: 18px; }
-  .textrow input { flex: 1; padding: 13px 16px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--bg-raise); color: var(--text); font: inherit; font-size: 14.5px; }
+  .textrow input { flex: 1; min-width: 0; padding: 13px 16px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--bg-raise); color: var(--text); font: inherit; font-size: 14.5px; }
   .textrow input:focus { outline: none; border-color: var(--accent); }
   .slots { display: flex; flex-direction: column; gap: 10px; }
   .slot { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 12px; padding: 13px 16px; display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; }
@@ -58,7 +58,7 @@
   .vb-select { flex: 1; background: var(--bg-card); color: var(--text); border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
   .vb-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg-card); color: var(--text); cursor: pointer; }
   .vb-btn:hover { border-color: var(--accent); }
-  @media (max-width: 900px) { .call-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .call-grid { grid-template-columns: minmax(0, 1fr); } }
   .ptt-modes { display: flex; gap: 8px; justify-content: center; margin: 18px 0 0; }
   .ptt-pill { border: 1px solid var(--line-strong); background: var(--bg-raise); color: var(--text-2); border-radius: 99px; padding: 7px 14px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
   .ptt-pill.on { border-color: var(--accent); color: var(--accent); background: rgba(41, 151, 255, .1); }

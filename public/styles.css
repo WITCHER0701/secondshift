@@ -22,7 +22,7 @@
   --ease: cubic-bezier(0.28, 0.11, 0.32, 1);
 }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; overflow-x: hidden; overflow-x: clip; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Inter, sans-serif;
@@ -30,7 +30,8 @@ body {
   color: var(--text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  overflow-x: hidden; /* fallback for browsers without clip */
+  overflow-x: clip; /* strictly non-scrollable: decorative orbs/glows never cause side-scroll */
 }
 
 ::selection { background: rgba(41, 151, 255, 0.35); }
