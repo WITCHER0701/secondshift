@@ -124,7 +124,26 @@ Targets: first month — 150–300 relevant connections, 3 posts/week. That comp
 
 Avoid: mass-connecting recruiters, LIONs (open-network spammers), anyone selling engagement.
 
-## 11 · Where LinkedIn meets your site
+## 11 · The 6-month-stale audit (do these in order, top = highest impact)
+
+Work down this list in one 30–40 minute sitting. Each item says where, what, why.
+
+1. **Photo** — if it's older than a year, retake it today: plain background, face fills the frame, decent light. Profiles with a clear face photo get far more profile views and connection accepts. (10 min, phone camera is fine.)
+2. **Banner** — upload `linkedin-banner.png` (section 1). Anyone who saw the old generic background instantly sees the change.
+3. **Headline** — replace whatever's there (most stale profiles say "Student at …" or a job title) with the line in section 2. This is the #1 ranking field in LinkedIn search — do not leave it student-flavored.
+4. **Custom URL** — profile → Public profile & URL → edit. From `rishi-raj-singh-b64907252` to something clean: `rishi-raj-singh-ai`, `rishi-secondshift`, or `rishirajsingh` (pick the first available). Then update the link on rishi.html's LinkedIn button.
+5. **About** — nuke the old one, paste section 3. First two lines are all most people see before "see more" — they must say what you build and for whom.
+6. **Featured** — stale profiles almost never use this. Add the 3 links from section 4. This is your visual storefront.
+7. **Experience** — add the **Founder · SecondShift** entry (section 5). Then rewrite your older entries: cut duty language ("responsible for…"), keep one line per role with an outcome or number if you have one. Don't delete history — recolor it toward building things.
+8. **Education** — VIT Bhopal, AI & DS is fine as-is. One tweak: set the activities line to "Building SecondShift — AI employees for small businesses" so even your education block advertises the work.
+9. **Skills** — prune anything you can't defend in an interview, add what you've actually shipped: Voice AI, LLM Orchestration, n8n, Docker, WebRTC, Node.js, Prompt Engineering, Automation, API Integration. Pin the top 3. Endorsements from new connections will follow.
+10. **Contact info + websites** — add secondshift.space as a website (type: Company). Stale profiles usually have zero links out.
+11. **Industry + location** — set Industry to "Software Development" (or "IT Services and IT Consulting") — this silently controls who LinkedIn suggests you to. Location: wherever you want clients from.
+12. **Activity** — the staleness killer: 6 months of silence. Publish Post 1 from section 8 within 24h of finishing this list, then follow the daily 10-minute routine (section 9). An updated profile with no activity goes stale again in a week.
+
+**Signal check (2 min):** open your profile in a logged-out browser window (or phone without the app). If LinkedIn shows the sign-up wall instead of your profile, run Settings → Visibility → **Public profile: ON** and Creator mode ON — clients and peers should be able to see you without logging in.
+
+## 12 · Where LinkedIn meets your site
 
 - Your LinkedIn button lives at https://www.secondshift.space/rishi.html ("Connect on LinkedIn") — visitors go from site → profile, connections come back to the site.
 - Put `linkedin.com/in/rishi-raj-singh-b64907252` in your site footer or About page if you want the loop both ways.
