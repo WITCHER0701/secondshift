@@ -25,20 +25,41 @@
   let targetY = null;
   let animating = false;
 
+  // The loop itself is the animator — CSS `scroll-behavior: smooth` would
+  // re-animate every programmatic step, and the animations compound into a
+  // runaway glide that keeps scrolling after the wheel stops. Force instant
+  // programmatic scrolls; the easing below does the smoothing instead.
+  function instantScrollTo(y) {
+    const root = document.documentElement;
+    const prev = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    window.scrollTo(0, y);
+    root.style.scrollBehavior = prev;
+  }
+
+  let lastNext = null; // lets the loop detect external scrolling (scrollbar, keys) and yield
+
   function inertialLoop() {
-    if (targetY === null) { animating = false; return; }
+    if (targetY === null) { animating = false; lastNext = null; return; }
     const current = window.scrollY;
+    // user scrolled by another means since our last step? stop — never fight them
+    if (lastNext !== null && Math.abs(current - lastNext) > 40) {
+      targetY = null; animating = false; lastNext = null;
+      return;
+    }
     // distance-adaptive: big flicks glide a touch longer, small ticks land almost instantly
     const dist = Math.abs(targetY - current);
     const ease = dist > 800 ? 0.28 : dist > 250 ? 0.42 : 0.65;
     const next = lerp(current, targetY, ease);
     if (Math.abs(targetY - next) < 1.5) {
-      window.scrollTo(0, targetY);
+      instantScrollTo(targetY);
       targetY = null;
       animating = false;
+      lastNext = null;
       return;
     }
-    window.scrollTo(0, next);
+    instantScrollTo(next);
+    lastNext = next;
     requestAnimationFrame(inertialLoop);
   }
   function kick() {
@@ -54,8 +75,10 @@
       e.preventDefault();
       const max = document.documentElement.scrollHeight - window.innerHeight;
       if (targetY === null) targetY = window.scrollY;
+      // normalize wheel units: deltaMode 1 = lines, 2 = pages (else pixels)
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * window.innerHeight : e.deltaY;
       // strict 1:1 with the wheel — no artificial slowdown, just eased landing
-      targetY = clamp(targetY + e.deltaY, 0, max);
+      targetY = clamp(targetY + dy, 0, max);
       kick();
     }, { passive: false });
     // keyboard/anchor jumps resync the target
