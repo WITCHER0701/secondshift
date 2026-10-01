@@ -102,24 +102,26 @@ cd "/d/my LLM/.n8n-files/website/secondshift" && node scripts/dograh-watchdog.js
    probes the free line every cycle — if it's down you get a 🚨 alert with a
    **🔧 Fix: fix-dograh-tunnels** button; `/diagnose` lists it too, and
    `/health` shows a `dograh free line` row. One tap reruns the watchdog.
-3. **Permanent URLs (recommended — do once):** quick tunnels rotate by
-   design; a **named Cloudflare tunnel** on your own domain never does.
-   The domain is already on Cloudflare, so:
-   ```bash
-   cloudflared tunnel login
-   cloudflared tunnel create dograh
-   # route two hostnames (adjust to the ports in docker-compose.yaml:
-   # api 8000, ui 3010):
-   cloudflared tunnel route dns dograh voice.secondshift.space
-   cloudflared tunnel route dns dograh voice-ui.secondshift.space
-   ```
-   Then run two tunnels with `--url http://localhost:8000` / `:3010`
-   (or point the existing containers at the tunnel token), put
-   `https://voice.secondshift.space` / `https://voice-ui.secondshift.space`
-   into `public/dograh-endpoints.json` + `.env` once, set
-   `DOGRAH_TUNNEL_MODE=named` in `.env` (watchdog then only monitors — it
-   never "recycles" a tunnel that cannot rotate), and keep the scheduled
-   task as the monitor. Commit + push once; no more rotation commits ever.
+3. **Permanent URLs (SET UP 2026-10-01 — one manual step left):** the named
+   tunnel **secondshift-dograh** (id `59db6928-a6a1-465d-9ed9-55b81bd81328`)
+   exists and runs as the `dograh-named-tunnel` container (http2, 4 edge
+   connections, creds + config in the `dograh-cf-creds` docker volume).
+   Hostnames routed: `voice.secondshift.space` → api:8000,
+   `voice-ui.secondshift.space` → ui:3010.
+   **Remaining manual step (only you can do it):** in GoDaddy
+   (dcc.godaddy.com → secondshift.space → DNS → Nameservers → change),
+   replace `ns21/ns22.domaincontrol.com` with
+   `dom.ns.cloudflare.com` + `magnolia.ns.cloudflare.com` (DNSSEC off if
+   prompted). The zone already exists in Cloudflare (account
+   cb031404e172d27b1fc97fbaa8251b2f) with all 4 original records imported,
+   so the site keeps working through propagation.
+   **What happens automatically after the flip:** within 5 minutes the
+   watchdog sees `voice.secondshift.space` go healthy, flips
+   `public/dograh-endpoints.json` + `.env` to the permanent URLs, sets
+   `DOGRAH_TUNNEL_MODE=named` (observe-only monitoring from then on),
+   retires the quick-tunnel containers, and pushes — Render deploys the
+   permanent URLs. Zero downtime, no manual commit. Quick tunnels and URL
+   rotation cease to exist.
 4. **If the PC itself is down:** nothing self-hosted can answer — the site
    correctly shows the gray offline state and the free mic + Vapi lines keep
    working. That limit is physics, not config.
