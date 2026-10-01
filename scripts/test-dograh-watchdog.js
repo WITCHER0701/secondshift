@@ -29,6 +29,7 @@ const writeEp = (j) => fs.writeFileSync(EP, JSON.stringify(j, null, 2) + '\n');
 // ── fake docker/git shim ───────────────────────────────────────────────
 let containerLogs = { 'cloudflared-tunnel': '', 'dograh-ui-tunnel': '' };
 let restarts = 0;
+let retires = 0;
 child_fix: {
   const child = require('child_process');
   child.execSync = function fakeSh(cmd) {
@@ -36,6 +37,7 @@ child_fix: {
     if (c.startsWith('docker logs cloudflared-tunnel')) return containerLogs['cloudflared-tunnel'];
     if (c.startsWith('docker logs dograh-ui-tunnel')) return containerLogs['dograh-ui-tunnel'];
     if (c.startsWith('docker restart')) { restarts++; return ''; }
+  if (c.startsWith('docker rm -f')) { retires++; return ''; }
     if (c.startsWith('git ')) return '';
     throw new Error('unexpected sh: ' + c);
   };
@@ -43,8 +45,11 @@ child_fix: {
 
 const GOOD_API = 'https://fresh-api-123.trycloudflare.com';
 const GOOD_UI = 'https://fresh-ui-456.trycloudflare.com';
+const PERM_API = 'https://voice.example.org';
+const PERM_UI = 'https://voice-ui.example.org';
+const HEALTHY = new Set([GOOD_API, PERM_API]);
 const realFetch = global.fetch;
-global.fetch = async (url) => (String(url).startsWith(GOOD_API) ? { ok: true } : Promise.reject(new Error('connect ECONNREFUSED dead')));
+global.fetch = async (url) => ([...HEALTHY].some((u) => String(url).startsWith(u)) ? { ok: true } : Promise.reject(new Error('connect ECONNREFUSED dead')));
 
 function banner(url) {
   return url
@@ -101,14 +106,27 @@ function runFresh() {
   t(fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_API_URL=' + GOOD_API), '.env created + synced with new api url');
 
   // 4 — named mode: dead URL + limbo logs → observe only, zero new restarts
+  // (apiUrl must NOT be trycloudflare, so the one-time transition branch is skipped)
   const r0 = restarts;
   process.env.DOGRAH_TUNNEL_MODE = 'named';
-  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: 'https://dead-named.trycloudflare.com', updatedAt: 'x' });
+  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: 'https://dead-named.example.org', updatedAt: 'x' });
   regLogs(null, null);
   await runFresh();
   t(restarts === r0, 'named mode → observe-only (no restarts)');
   t(logs.join(' ').includes('named tunnel NOT healthy'), 'named mode reports unhealthy');
   process.env.DOGRAH_TUNNEL_MODE = 'quick';
+
+  // 5 — one-time transition: quick-tunnel endpoints + live perm URL → flip everything
+  process.env.DOGRAH_PERM_API = PERM_API;
+  process.env.DOGRAH_PERM_UI = PERM_UI;
+  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: GOOD_API, updatedAt: 'old' });
+  await runFresh();
+  const ep5 = JSON.parse(fs.readFileSync(EP, 'utf8'));
+  t(ep5.apiUrl === PERM_API && ep5.uiUrl === PERM_UI, 'transition: endpoints flipped to permanent URLs', JSON.stringify(ep5));
+  t(fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_TUNNEL_MODE=named') && fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_API_URL=' + PERM_API), 'transition: .env gets perm URLs + named mode');
+  t(retires === 1, 'transition: quick-tunnel containers retired', 'retires=' + retires);
+  delete process.env.DOGRAH_PERM_API;
+  delete process.env.DOGRAH_PERM_UI;
 
   global.fetch = realFetch;
   console.log = realLog;

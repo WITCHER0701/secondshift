@@ -28,9 +28,23 @@ const TIMEOUT = process.env.WATCHDOG_TIMEOUT_MS || '20000';
 const MODE = (process.env.DOGRAH_TUNNEL_MODE || 'quick').toLowerCase();
 const FILE = path.join(ROOT, 'public', 'dograh-endpoints.json');
 const ENVFILE = path.join(ROOT, '.env');
+// The scheduler runs us without dotenv — read our own knobs from .env when
+// not set in the environment (DOGRAH_TUNNEL_MODE, DOGRAH_PERM_API/UI).
+// Must run BEFORE the constants below are computed.
+try {
+  for (const line of fs.readFileSync(ENVFILE, 'utf8').split('\n')) {
+    const m = line.match(/^\s*(DOGRAH_[A-Z_]+)\s*=\s*(.*)\s*$/);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^"|"$/g, '');
+  }
+} catch (_) { /* .env optional */ }
 
 const API_TUNNEL = 'cloudflared-tunnel';
 const UI_TUNNEL = 'dograh-ui-tunnel';
+// Permanent named-tunnel hostnames (created once; never rotate). When these
+// go live, the watchdog flips the endpoints file from quick-tunnel URLs to
+// them automatically and retires the quick-tunnel containers.
+const PERM_API = (process.env.DOGRAH_PERM_API || 'https://voice.secondshift.space').replace(/\/$/, '');
+const PERM_UI = (process.env.DOGRAH_PERM_UI || 'https://voice-ui.secondshift.space').replace(/\/$/, '');
 
 function sh(cmd, opts = {}) {
   return execSync(cmd, { cwd: ROOT, timeout: Number(TIMEOUT) + 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
@@ -114,7 +128,32 @@ async function recycle() {
 }
 
 async function main() {
-  const ep = readEndpoints();
+  let ep = readEndpoints();
+
+  // ── one-time transition: permanent URLs live → adopt them everywhere ──
+  if ((ep.apiUrl || '').includes('trycloudflare.com') && (await healthy(PERM_API))) {
+    log(`permanent tunnel is live (${PERM_API}) — switching endpoints away from quick tunnels`);
+    ep = { ...ep, token: ep.token || '', uiUrl: PERM_UI, apiUrl: PERM_API, updatedAt: new Date().toISOString() };
+    fs.writeFileSync(FILE, JSON.stringify(ep, null, 2) + '\n');
+    try {
+      let env = '';
+      try { env = fs.readFileSync(ENVFILE, 'utf8'); } catch (_) { /* first run */ }
+      const set = (k, v) => { env = new RegExp(`^${k}=.*$`, 'm').test(env) ? env.replace(new RegExp(`^${k}=.*$`, 'm'), `${k}=${v}`) : env + (env && !env.endsWith('\n') ? '\n' : '') + `${k}=${v}\n`; };
+      set('DOGRAH_API_URL', PERM_API); set('DOGRAH_UI_URL', PERM_UI); set('DOGRAH_TUNNEL_MODE', 'named');
+      fs.writeFileSync(ENVFILE, env);
+    } catch (e) { /* .env optional */ }
+    try { sh(`docker rm -f ${API_TUNNEL} ${UI_TUNNEL}`); log('quick-tunnel containers retired'); } catch (e) { log(`quick-tunnel cleanup skipped: ${e.message}`); }
+    try {
+      sh('git add public/dograh-endpoints.json');
+      sh(`git commit -m "chore: switch Dograh free line to permanent tunnel URLs (watchdog)"`);
+      sh(`git push origin ${BRANCH}`);
+      log('pushed — Render will deploy the permanent URLs');
+    } catch (e) {
+      log(`git push failed: ${String(e.message).slice(0, 200)} (file updated locally)`);
+    }
+    log('done');
+    return;
+  }
 
   if (MODE === 'named') {
     log(await healthy(ep.apiUrl) ? `named tunnel healthy: ${ep.apiUrl}` : `WARNING: named tunnel NOT healthy: ${ep.apiUrl || '(none)'}`);
