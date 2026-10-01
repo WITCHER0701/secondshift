@@ -56,6 +56,26 @@ Automatic alerts you'll receive without doing anything:
 | Multiple people get replies | Impossible — commands only work from your chat id; strangers get silence |
 | Want a second viewer (e.g. a partner) | They press START on the bot, you append their chat id — currently the code reads one `TELEGRAM_CHAT_ID`; ask me to add a list |
 
+## 5.5 · The /agent relay (Codebuff on this PC)
+
+`/agent <task>` runs an agent on the PC's repo and replies with a summary.
+Two brains, chosen automatically — **no Codebuff credits needed**:
+
+| Backend | When | Needs |
+|---|---|---|
+| **OpenRouter (default)** | `OPENROUTER_API_KEY` set in local `.env` | Free key from openrouter.ai/keys — runs FREE models (Qwen 3.8, Nemotron-3, Cohere code) with a local tool loop (read/write/edit/search/run commands), auto-fallback across models |
+| **Codebuff SDK** | no OpenRouter key, or `AGENT_BACKEND=codebuff` | Codebuff credits (out of credits → friendly message pointing at the free option) |
+
+Setup: put `OPENROUTER_API_KEY=sk-or-…` in the **PC's** `.env` (Render never
+needs it — the agent only runs where the repo lives). Optional knobs:
+`AGENT_FREE_MODELS` (comma-separated chain), `AGENT_BACKEND`,
+`AGENT_MAX_STEPS`, `AGENT_TIMEOUT_MS`. Test without Telegram:
+`node scripts/test-agent.js`.
+
+Safety: owner-only command, one run at a time, 8-min hard timeout, tools
+jailed to the repo, and hard rules against git push / deploys / printing
+secrets.
+
 ## 6 · What it costs
 
 **$0.** Telegram's Bot API is free with no meaningful limits at this scale. Compare: UptimeRobot-style SaaS monitoring starts at ~$7–20/mo and doesn't give you `/status` with *your* business numbers.

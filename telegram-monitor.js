@@ -340,9 +340,9 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
     state.commands.replies[cmd] = (state.commands.replies[cmd] || 0) + 1;
     const a = agentRunner.status();
     if (cmd === '/agentstatus') {
-      if (!a.enabled) return reply('Agent runner inactive — no Codebuff auth on the PC (run `npx codebuff login` there).');
+      if (!a.enabled) return reply('Agent runner inactive — set OPENROUTER_API_KEY (free) in .env on the PC, or run `npx codebuff login` there.');
       const lines = [
-        '🤖 Agent runner — model ' + a.model,
+        '🤖 Agent runner — backend ' + a.backend + (a.backend === 'openrouter' ? ' (free models: ' + (a.models || []).slice(0, 2).join(', ') + (a.models.length > 2 ? '…' : '') + ')' : ''),
         a.running
           ? 'State: 🔨 running "' + a.lastTask + '" since ' + String(a.startedAt).slice(11, 19)
           : 'State: idle',
@@ -353,7 +353,7 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
     }
     const task = String(text || '').trim().replace(/^\/agent(@\S+)?\s*/i, '');
     if (!task) return reply('Usage: /agent <task>\nExample: /agent find all TODO comments in server.js and list them');
-    if (!a.enabled) return reply('Agent runner inactive — no Codebuff auth on the PC. Run `npx codebuff login` there first.');
+    if (!a.enabled) return reply('Agent runner inactive — set OPENROUTER_API_KEY (free) in .env on the PC first.');
     if (a.running) return reply('⏳ Already working on "' + a.lastTask + '" — I\'ll report when it finishes. /agentstatus for details.');
     await reply('🚀 Agent on it — "' + task.slice(0, 140) + '"\nIt reads/edits the repo on the PC, never pushes to git, and I\'ll send the summary here when done.');
     agentRunner.runTask(task, { onUpdate: (m) => { reply(m).catch(() => {}); } })

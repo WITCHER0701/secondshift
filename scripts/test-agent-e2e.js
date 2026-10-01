@@ -55,7 +55,7 @@ runnerStub.runTask = async (task) => {
   } finally { runnerStub.__running = false; }
 };
 runnerStub.__running = false;
-runnerStub.status = () => ({ enabled: true, model: 'stub-model', running: runnerStub.__running, startedAt: new Date().toISOString(), lastTask: 'stub', lastFinishedAt: null, lastOk: null, lastDurationMs: null, lastError: null, runs: 0, failed: 0 });
+runnerStub.status = () => ({ enabled: true, backend: 'openrouter', models: ['stub-model'], running: runnerStub.__running, startedAt: new Date().toISOString(), lastTask: 'stub', lastFinishedAt: null, lastOk: null, lastDurationMs: null, lastError: null, runs: 0, failed: 0 });
 
 (async () => {
   await new Promise((r) => server.listen(MOCK_PORT, r));
@@ -86,7 +86,7 @@ runnerStub.status = () => ({ enabled: true, model: 'stub-model', running: runner
   // 4 — /agentstatus shows the stubbed runner
   updates = ['/agentstatus'];
   await sleep(1200);
-  t(sent.some((s) => s.includes('Agent runner — model stub-model')), '/agentstatus reports runner info');
+  t(sent.some((s) => s.includes('Agent runner — backend openrouter')), '/agentstatus reports runner info');
 
   // 5 — other commands unaffected
   updates = ['/nonsense'];
