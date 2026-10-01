@@ -44,6 +44,12 @@ not in this repo.
    (this PC's LAN IP — both the browser and the api container can reach
    coturn there). If your Wi-Fi IP changes, update TURN_HOST.
 4. `ENABLE_TELEMETRY=false` (was set at install).
+5. **Tunnels run `--protocol http2`** (recreated 2026-10-01, same names/ports).
+   Default QUIC (UDP) kept flapping on this NAT — URLs churned several times
+   an hour. `docker restart` preserves the pin, so watchdog heals stay
+   http2 too. The api tunnel also supports a permanent named tunnel: set
+   `CLOUDFLARE_TUNNEL_TOKEN` + `CLOUDFLARED_COMMAND="tunnel run"` in
+   `dograh/.env` (see "Never unreachable" below).
 
 ## Daily use
 
