@@ -40,6 +40,7 @@ const state = {
   startedAt: new Date().toISOString(),
   watchdog: { running: false, lastRunAt: null, lastResults: [] },
   commands: { running: false, replies: {}, lastCommandAt: null },
+  agentDiagnoses: { triggered: 0, ok: 0, failed: 0, lastAt: null, lastOk: null },
 };
 
 let stopped = false;
@@ -120,6 +121,41 @@ function routePattern(req) {
   } catch (_) { return '?'; }
 }
 
+// ── automatic agent diagnosis (free OpenRouter brain, fire-and-forget) ──
+// Alerts stay instant; the agent's findings arrive as a follow-up message.
+// Rate-capped so a 5xx storm can't hammer the free model pool: one at a
+// time, ≥90s apart, max 6/hour — and only when the FREE brain is active.
+const AUTO = { running: false, lastAt: 0, hour: [], MIN_GAP_MS: parseInt(process.env.TELEGRAM_AUTO_DIAG_GAP_MS, 10) || 90 * 1000, MAX_PER_HOUR: parseInt(process.env.TELEGRAM_AUTO_DIAG_MAX_PER_HOUR, 10) || 6 };
+function autoDiagnoseAllowed(key) {
+  if (!enabled || stopped || AUTO.running || !agentRunner.enabled) return false;
+  if (agentRunner.status().backend !== 'openrouter') return false; // never burn Codebuff credits on auto-diagnosis
+  const now = Date.now();
+  if (now - AUTO.lastAt < AUTO.MIN_GAP_MS) return false;
+  AUTO.hour = AUTO.hour.filter((t) => now - t < 3600 * 1000);
+  if (AUTO.hour.length >= AUTO.MAX_PER_HOUR) return false;
+  AUTO.hour.push(now);
+  return true;
+}
+async function autoDiagnose(agentTask, { key, label, preApproved }) {
+  if (!preApproved && !autoDiagnoseAllowed(key)) return;
+  AUTO.running = true;
+  AUTO.lastAt = Date.now();
+  try {
+    const r = await agentRunner.runTask(String(agentTask).slice(0, 1500), { onUpdate: () => {} });
+    const findings = String(r.text || '').replace(/^🤖[^\n]*\n+/, '').trim(); // drop the "done in Ns" tag
+    const head = '🔎 Agent diagnosis — ' + label + '\n';
+    const body = r.ok
+      ? findings.slice(0, 1200)
+      : '⚠ diagnosis failed: ' + String(findings || 'unknown error').replace(/^❌ Agent failed: /, '').slice(0, 300);
+    await send(head + body, { force: true });
+    state.agentDiagnoses.triggered++; state.agentDiagnoses.lastAt = new Date().toISOString();
+    state.agentDiagnoses.lastOk = !!r.ok;
+    if (r.ok) state.agentDiagnoses.ok++; else state.agentDiagnoses.failed++;
+  } catch (e) {
+    /* never let diagnosis trouble the monitor */
+  } finally { AUTO.running = false; }
+}
+
 /** Called by the server's 5xx tap after any response with status ≥ 500. */
 function notify5xx(req, res) {
   if (!enabled || stopped) return;
@@ -127,12 +163,21 @@ function notify5xx(req, res) {
   const key = '5xx:' + req.method + ':' + pat;
   const hits = pruneRecent(key); hits.push(Date.now()); recentByKey.set(key, hits);
   const since = new Date().toISOString().slice(11, 19);
+  const path = String(req.originalUrl || req.url || '?').split('?')[0].slice(0, 160);
+  const willDiagnose = autoDiagnoseAllowed(key + ':diag'); // consume the quota slot ONCE
+  const diagnosing = willDiagnose ? ' \n🔎 agent is diagnosing — findings in a moment' : '';
   const text =
     '🚨 5xx — ' + req.method + ' ' + pat + '\n' +
-    'path: ' + String(req.originalUrl || req.url || '?').split('?')[0].slice(0, 160) + '\n' +
+    'path: ' + path + '\n' +
     'status: ' + res.statusCode + ' · at ' + since + '\n' +
-    '(' + hits.length + ' × in the last hour for this route)';
+    '(' + hits.length + ' × in the last hour for this route)' + diagnosing;
   send(text, { key, minGapMs: 5 * 60 * 1000 }).catch(() => {});
+  if (willDiagnose) autoDiagnose(
+    'The SecondShift site just returned HTTP ' + res.statusCode + ' on ' + req.method + ' ' + pat + ' (path ' + path + '). ' +
+    'Diagnose the likely cause from the code: locate the handler for this route in the repo (server.js and any module it delegates to), read it, and identify what could throw or fail. ' +
+    'Report the single most likely cause with file:line, in max 6 lines. Read-only: do not modify any files.',
+    { key: key + ':diag', label: req.method + ' ' + pat, preApproved: true }
+  ).catch(() => {});
 }
 
 /** Called on process-level crashes. err may be anything. */
@@ -183,7 +228,12 @@ function startWatchdog({ intervalMs = 5 * 60 * 1000, probes = [], firstDelayMs =
       const was = since[p.name];
       if (!r.ok && !was) {
         since[p.name] = new Date().toISOString();
-        send('👁 Watchdog — ' + p.name + ' DOWN\n❌ ' + (r.detail || 'drift') + '\nsince ' + since[p.name], { key: 'wd:' + p.name }).catch(() => {});
+        const willDiagnose = !!(p.diagnoseTask && autoDiagnoseAllowed('wd-diag:' + p.name)); // consume the slot ONCE
+        const diagnosing = willDiagnose ? ' \n🔎 agent is diagnosing — findings in a moment' : '';
+        send('👁 Watchdog — ' + p.name + ' DOWN\n❌ ' + (r.detail || 'drift') + '\nsince ' + since[p.name] + diagnosing, { key: 'wd:' + p.name }).catch(() => {});
+        if (willDiagnose) {
+          autoDiagnose(String(p.diagnoseTask), { key: 'wd-diag:' + p.name, label: p.name + ' down', preApproved: true }).catch(() => {});
+        }
       } else if (r.ok && was) {
         const mins = Math.max(1, Math.round((Date.now() - new Date(was).getTime()) / 60000));
         delete since[p.name];

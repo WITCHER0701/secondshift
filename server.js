@@ -473,7 +473,8 @@ if (require.main === module) {
             const cs = store.cloudStatus();
             return cs.enabled && cs.lastError ? { ok: false, detail: 'last push/pull error: ' + cs.lastError } : null;
           } },
-        { name: 'dograh free line', run: () => dograhProbe() },
+        { name: 'dograh free line', run: () => dograhProbe(),
+          diagnoseTask: 'The Dograh free voice line is unreachable from the site. Diagnose: read public/dograh-endpoints.json, check scripts/dograh-watchdog.js behavior, and report in max 5 lines whether this looks like a dead quick tunnel (needs the fix-dograh-tunnels repair), stale endpoints, or a Dograh container problem. Read-only: do not modify files or restart anything.' },
       ],
     });
     // owner commands: /status /health /help via Telegram long-poll
