@@ -4,14 +4,18 @@
 // The Dograh stack runs on this PC behind trycloudflare quick tunnels whose
 // URLs rotate whenever the tunnels restart. The live site learns the current
 // URLs from public/dograh-endpoints.json (tracked in git, deployed to Render).
-// This script, run every few minutes by Windows Task Scheduler:
+// This script, run every 5 minutes by Windows Task Scheduler
+// (DograhTunnelWatchdog → scripts/dograh-watchdog.cmd):
 //   1. health-checks the API tunnel URL from the endpoints file
-//   2. if dead: restarts the tunnel containers and reads the new URLs
-//   3. rewrites public/dograh-endpoints.json
-//   4. commits + pushes so Render auto-deploys the fresh URLs
-// Also writes .env (DOGRAH_API_URL/DOGRAH_UI_URL) so the local site agrees.
+//   2. if dead (or the tunnel is registered-dead "limbo"): restarts both
+//      tunnel containers and reads the new URLs from their logs
+//   3. rewrites public/dograh-endpoints.json + .env — but commits + pushes
+//      ONLY when the URLs actually changed (health flaps are no-ops)
+//   4. DOGRAH_TUNNEL_MODE=named skips restart logic entirely (named tunnels
+//      on your own domain never rotate — see VOICE-DOGRAH.md)
 //
-// Env/config (defaults fine): DOGRAH_REPO_DIR, DOGRAH_BRANCH, WATCHDOG_TIMEOUT_MS
+// Env/config: DOGRAH_REPO_DIR, DOGRAH_BRANCH, WATCHDOG_TIMEOUT_MS,
+// DOGRAH_TUNNEL_MODE=quick|named
 // Run manually: node scripts/dograh-watchdog.js
 
 const { execSync } = require('child_process');
@@ -21,6 +25,7 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const BRANCH = process.env.DOGRAH_BRANCH || 'main';
 const TIMEOUT = process.env.WATCHDOG_TIMEOUT_MS || '20000';
+const MODE = (process.env.DOGRAH_TUNNEL_MODE || 'quick').toLowerCase();
 const FILE = path.join(ROOT, 'public', 'dograh-endpoints.json');
 const ENVFILE = path.join(ROOT, '.env');
 
@@ -55,46 +60,79 @@ function tunnelUrl(container, sinceArg) {
   } catch (e) { return null; }
 }
 
-async function main() {
-  let ep = readEndpoints();
-  const was = ep.apiUrl || '(none)';
-  let changed = false;
+/** True when cloudflared is up but stuck retrying a server-side dead tunnel. */
+function tunnelInLimbo(container) {
+  try {
+    const logs = sh(`docker logs ${container} --since 10m 2>&1`);
+    return /Tunnel not found/.test(logs);
+  } catch (e) { return false; }
+}
 
-  if (await healthy(ep.apiUrl)) {
-    log(`tunnel healthy: ${ep.apiUrl}`);
-  } else {
-    log(`tunnel DEAD (${was}) — restarting tunnels`);
-    try { sh(`docker restart ${API_TUNNEL} ${UI_TUNNEL}`); } catch (e) { log(`restart failed: ${e.message}`); }
-    // quick tunnels print their hostname a few seconds after boot
+async function recycle() {
+  log(`tunnel DEAD — restarting ${API_TUNNEL} + ${UI_TUNNEL}`);
+  try { sh(`docker restart ${API_TUNNEL} ${UI_TUNNEL}`); } catch (e) { log(`restart failed: ${e.message}`); }
+  // quick tunnels print their hostname a few seconds after boot
+  await new Promise((r) => setTimeout(r, 15000));
+  let api = tunnelUrl(API_TUNNEL, '--since 2m');
+  let ui = tunnelUrl(UI_TUNNEL, '--since 2m');
+  if (!api || !ui) {
+    log('no URLs yet — one more recycle');
+    try { sh(`docker restart ${API_TUNNEL} ${UI_TUNNEL}`); } catch (e) { /* logged next parse */ }
     await new Promise((r) => setTimeout(r, 15000));
-    const api = tunnelUrl(API_TUNNEL, '--since 2m');
-    const ui = tunnelUrl(UI_TUNNEL, '--since 2m');
-    if (!api || !ui) { log('ERROR: no new tunnel URLs in logs — giving up this run'); process.exit(1); }
-    ep = { ...ep, token: ep.token || '', uiUrl: ui, apiUrl: api, updatedAt: new Date().toISOString() };
-    if (!ep.token) { log('ERROR: endpoints file had no token; not overwriting'); process.exit(1); }
-    fs.writeFileSync(FILE, JSON.stringify(ep, null, 2) + '\n');
-    // keep local .env in sync for the local server
-    try {
-      let env = fs.readFileSync(ENVFILE, 'utf8');
-      const set = (k, v) => { env = new RegExp(`^${k}=.*$`, 'm').test(env) ? env.replace(new RegExp(`^${k}=.*$`, 'm'), `${k}=${v}`) : env + `\n${k}=${v}`; };
-      set('DOGRAH_API_URL', api); set('DOGRAH_UI_URL', ui);
-      fs.writeFileSync(ENVFILE, env);
-    } catch (e) { /* .env optional */ }
-    changed = true;
-    log(`new URLs: api=${api} ui=${ui} — verifying`);
-    await new Promise((r) => setTimeout(r, 5000));
-    if (!(await healthy(api))) log('WARNING: new API tunnel not healthy yet (may need another cycle)');
+    api = tunnelUrl(API_TUNNEL, '--since 2m');
+    ui = tunnelUrl(UI_TUNNEL, '--since 2m');
+  }
+  if (!api || !ui) { log('ERROR: no new tunnel URLs in logs — giving up this run'); process.exit(1); }
+
+  const prev = readEndpoints();
+  if (prev.apiUrl === api && prev.uiUrl === ui) {
+    log(`URLs unchanged (${api}) — file already current, skipping commit`);
+    return;
+  }
+  const ep = { ...prev, token: prev.token || '', uiUrl: ui, apiUrl: api, updatedAt: new Date().toISOString() };
+  if (!ep.token) { log('ERROR: endpoints file had no token; not overwriting'); process.exit(1); }
+  fs.writeFileSync(FILE, JSON.stringify(ep, null, 2) + '\n');
+  // keep local .env in sync for the local server (created if missing)
+  try {
+    let env = '';
+    try { env = fs.readFileSync(ENVFILE, 'utf8'); } catch (_) { /* first run */ }
+    const set = (k, v) => { env = new RegExp(`^${k}=.*$`, 'm').test(env) ? env.replace(new RegExp(`^${k}=.*$`, 'm'), `${k}=${v}`) : env + (env && !env.endsWith('\n') ? '\n' : '') + `${k}=${v}\n`; };
+    set('DOGRAH_API_URL', api); set('DOGRAH_UI_URL', ui);
+    fs.writeFileSync(ENVFILE, env);
+  } catch (e) { /* .env optional */ }
+  log(`new URLs: api=${api} ui=${ui} — verifying`);
+  await new Promise((r) => setTimeout(r, 5000));
+  if (!(await healthy(api))) log('WARNING: new API tunnel not healthy yet (may need another cycle)');
+  try {
+    sh('git add public/dograh-endpoints.json');
+    sh(`git commit -m "chore: refresh Dograh tunnel endpoints (watchdog)"`);
+    sh(`git push origin ${BRANCH}`);
+    log('pushed — Render will auto-deploy the new endpoints');
+  } catch (e) {
+    log(`git push failed: ${String(e.message).slice(0, 200)} (file updated locally; will retry next run)`);
+  }
+}
+
+async function main() {
+  const ep = readEndpoints();
+
+  if (MODE === 'named') {
+    log(await healthy(ep.apiUrl) ? `named tunnel healthy: ${ep.apiUrl}` : `WARNING: named tunnel NOT healthy: ${ep.apiUrl || '(none)'}`);
+    log('done');
+    return;
   }
 
-  if (changed) {
-    try {
-      sh('git add public/dograh-endpoints.json');
-      sh(`git commit -m "chore: refresh Dograh tunnel endpoints (watchdog)"`);
-      sh(`git push origin ${BRANCH}`);
-      log('pushed — Render will auto-deploy the new endpoints');
-    } catch (e) {
-      log(`git push failed: ${String(e.message).slice(0, 200)} (file updated locally; will retry next run)`);
+  if (await healthy(ep.apiUrl)) {
+    if (tunnelInLimbo(API_TUNNEL)) {
+      // URL answers but cloudflared keeps retrying a dead registration —
+      // this is the 21-hour crash-loop state; recycle before it rots.
+      log('tunnel answers but cloudflared is in limbo (Tunnel not found) — recycling proactively');
+      await recycle();
+    } else {
+      log(`tunnel healthy: ${ep.apiUrl}`);
     }
+  } else {
+    await recycle();
   }
   log('done');
 }

@@ -33,6 +33,40 @@ const tmon = require('./telegram-monitor');
 const agentRunner = require('./agent-runner');
 const { seed } = require('./scripts/seed');
 
+// Dograh free-line endpoints — public/dograh-endpoints.json is the single
+// source of truth (tracked in git; dograh-watchdog rewrites + pushes it).
+// (.env keys DOGRAH_API_URL/DOGRAH_UI_URL are a fallback only — a boot-time
+// read can race the watchdog's .env rewrite and go stale.)
+const DOGRAH_CFG = path.join(__dirname, 'public', 'dograh-endpoints.json');
+function dograhApiUrl() {
+  try { return JSON.parse(fs.readFileSync(DOGRAH_CFG, 'utf8')).apiUrl || process.env.DOGRAH_API_URL || null; } catch (_) { return process.env.DOGRAH_API_URL || null; }
+}
+async function dograhProbe() {
+  const url = dograhApiUrl();
+  if (!url) return { ok: false, detail: 'no apiUrl in dograh-endpoints.json' };
+  try {
+    const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 8000);
+    const r = await fetch(url.replace(/\/$/, '') + '/api/v1/health', { signal: ac.signal });
+    clearTimeout(to);
+    return r.ok ? { ok: true } : { ok: false, detail: 'HTTP ' + r.status };
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    return { ok: false, detail: msg.includes('abort') ? 'timeout' : msg.slice(0, 60) };
+  }
+}
+/** One-tap repair: re-run the tunnel watchdog (restarts dead tunnels, updates endpoints, pushes). */
+async function runDograhWatchdog() {
+  const { execFile } = require('child_process');
+  return new Promise((resolve) => {
+    execFile(process.execPath, [path.join(__dirname, 'scripts', 'dograh-watchdog.js')],
+      { cwd: __dirname, timeout: 150000, env: { ...process.env } }, (err, stdout, stderr) => {
+        const out = String(stdout || '');
+        if (err && !/tunnel healthy/.test(out)) return resolve({ ok: false, detail: String((err && err.message) || err).slice(0, 120) + ' · ' + out.slice(-120) });
+        resolve({ ok: true, detail: out.trim().split('\n').slice(-2).join(' · ').slice(0, 200) });
+      });
+  });
+}
+
 const app = express();
 const RAW_PORT = process.env.PORT;
 const PORT = (RAW_PORT && parseInt(RAW_PORT, 10) > 0) ? parseInt(RAW_PORT, 10) : 4000;
@@ -439,6 +473,7 @@ if (require.main === module) {
             const cs = store.cloudStatus();
             return cs.enabled && cs.lastError ? { ok: false, detail: 'last push/pull error: ' + cs.lastError } : null;
           } },
+        { name: 'dograh free line', run: () => dograhProbe() },
       ],
     });
     // owner commands: /status /health /help via Telegram long-poll
@@ -477,6 +512,7 @@ if (require.main === module) {
         out.push({ name: 'data store', ok: count > 0, detail: count > 0 ? (count + ' records in file') : (file ? 'unreadable/empty' : 'missing') });
         const cs = store.cloudStatus();
         out.push({ name: 'cloud sync', ok: !(cs.enabled && cs.lastError), detail: cs.enabled ? (cs.lastError ? cs.lastError.slice(0, 60) : cs.provider + ' ok') : 'local mode' });
+        out.push({ name: 'dograh free line', ...(await dograhProbe()) });
         return out;
       },
       // ── one-tap safe remediations (never code edits) ──
@@ -487,6 +523,8 @@ if (require.main === module) {
         const cs = store.cloudStatus();
         if (cs.enabled && cs.lastError) issues.push({ problem: 'Cloud sync failing', detail: String(cs.lastError).slice(0, 90), fix: 'force-cloud-push' });
         if (vapiBridgeStats.lastError) issues.push({ problem: 'Vapi bridge erroring', detail: String(vapiBridgeStats.lastError).slice(0, 90), fix: 'test-brain' });
+        const dg = await dograhProbe();
+        if (!dg.ok) issues.push({ problem: 'Dograh free line unreachable', detail: dg.detail || 'tunnel down', fix: 'fix-dograh-tunnels' });
         return issues;
       },
     });
@@ -520,6 +558,13 @@ if (require.main === module) {
       const r = await agentRunner.runTask('Health ping: reply with exactly AGENT-OK and nothing else. Do not read or modify any files.', {});
       if (!r.ok) throw new Error(String(r.text).replace(/^❌ Agent failed: /, ''));
       return { message: '✅ Agent replied in ' + Math.round((r.durationMs || 0) / 1000) + 's — headless Codebuff relay working.' };
+    });
+    tmon.registerFix('fix-dograh-tunnels', async () => {
+      const r = await runDograhWatchdog();
+      if (!r.ok) throw new Error('watchdog run failed: ' + (r.detail || 'unknown'));
+      const after = await dograhProbe();
+      if (!after.ok) throw new Error('watchdog ran but tunnel still unreachable (' + (after.detail || 'no detail') + ') — it will retry next cycle');
+      return { message: '✅ Free line back: ' + (dograhApiUrl() || '').replace(/^https:\/\//, '').slice(0, 48) };
     });
   } else {
     console.log('[monitor] Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — running without remote eyes');

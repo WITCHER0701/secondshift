@@ -69,17 +69,54 @@ manually refreshed `.env`. **`scripts/dograh-watchdog.js` now automates it**:
 - Windows scheduled task **`DograhTunnelWatchdog`** runs it every 5 minutes
   (`schtasks //Query //TN DograhTunnelWatchdog`; logs → `watchdog.log`).
 - Each run health-checks the API tunnel URL from `public/dograh-endpoints.json`.
-- If dead: restarts `cloudflared-tunnel` + `dograh-ui-tunnel`, reads the new
-  URLs from the container logs, rewrites the JSON file **and `.env`**, then
-  commits + pushes — Render auto-deploys the fresh endpoints within ~1 min.
-- Tested: planted a dead URL → watchdog detected it, healed, pushed
-  (commit `471e1c5`). Healthy runs are no-ops (no commits).
+- If dead (or cloudflared is stuck retrying a dead registration — the
+  "Tunnel not found" limbo): restarts `cloudflared-tunnel` + `dograh-ui-tunnel`,
+  reads the new URLs from the container logs, rewrites the JSON file **and
+  `.env`**, then commits + pushes — Render auto-deploys the fresh endpoints
+  within ~1 min. Commits only happen when URLs actually changed (health
+  flaps are no-ops). Tested: planted a dead URL → watchdog detected it,
+  healed, pushed (commit `471e1c5`). Healthy runs are no-ops (no commits).
+- Task rebuilt 2026-09-27 (`scripts/fix-watchdog-task.ps1`): repetition is
+  indefinite (the old task silently stopped repeating each day at 02:53 —
+  that 13-hour dark window let a dead tunnel sit for 21 h), runs on battery,
+  wakes to run, and logs via `scripts/dograh-watchdog.cmd` → `watchdog.log`.
 
 Run it manually any time:
 
 ```bash
 cd "/d/my LLM/.n8n-files/website/secondshift" && node scripts/dograh-watchdog.js
 ```
+
+## Never unreachable — the four layers
+
+1. **Self-heal (automatic, ≤5 min):** the scheduler task runs the watchdog
+   every 5 minutes around the clock; it recycles dead/limbo tunnels and
+   pushes fresh URLs that Render deploys in ~1 min. Downtime ceiling ≈ 6 min.
+2. **Server-side eyes (automatic alert):** the site's Telegram watchdog
+   probes the free line every cycle — if it's down you get a 🚨 alert with a
+   **🔧 Fix: fix-dograh-tunnels** button; `/diagnose` lists it too, and
+   `/health` shows a `dograh free line` row. One tap reruns the watchdog.
+3. **Permanent URLs (recommended — do once):** quick tunnels rotate by
+   design; a **named Cloudflare tunnel** on your own domain never does.
+   The domain is already on Cloudflare, so:
+   ```bash
+   cloudflared tunnel login
+   cloudflared tunnel create dograh
+   # route two hostnames (adjust to the ports in docker-compose.yaml:
+   # api 8000, ui 3010):
+   cloudflared tunnel route dns dograh voice.secondshift.space
+   cloudflared tunnel route dns dograh voice-ui.secondshift.space
+   ```
+   Then run two tunnels with `--url http://localhost:8000` / `:3010`
+   (or point the existing containers at the tunnel token), put
+   `https://voice.secondshift.space` / `https://voice-ui.secondshift.space`
+   into `public/dograh-endpoints.json` + `.env` once, set
+   `DOGRAH_TUNNEL_MODE=named` in `.env` (watchdog then only monitors — it
+   never "recycles" a tunnel that cannot rotate), and keep the scheduled
+   task as the monitor. Commit + push once; no more rotation commits ever.
+4. **If the PC itself is down:** nothing self-hosted can answer — the site
+   correctly shows the gray offline state and the free mic + Vapi lines keep
+   working. That limit is physics, not config.
 
 **Limits of the free setup (be honest with yourself):**
 
