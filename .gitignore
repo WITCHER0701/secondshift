@@ -4,3 +4,4 @@ data/
 .DS_Store
 .env
 admin-inline-check.js
+watchdog.heartbeat

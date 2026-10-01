@@ -93,16 +93,35 @@ Run it manually any time:
 cd "/d/my LLM/.n8n-files/website/secondshift" && node scripts/dograh-watchdog.js
 ```
 
-## Never unreachable — the four layers
+## Never unreachable — the five layers
 
 1. **Self-heal (automatic, ≤5 min):** the scheduler task runs the watchdog
    every 5 minutes around the clock; it recycles dead/limbo tunnels and
    pushes fresh URLs that Render deploys in ~1 min. Downtime ceiling ≈ 6 min.
-2. **Server-side eyes (automatic alert):** the site's Telegram watchdog
-   probes the free line every cycle — if it's down you get a 🚨 alert with a
-   **🔧 Fix: fix-dograh-tunnels** button; `/diagnose` lists it too, and
-   `/health` shows a `dograh free line` row. One tap reruns the watchdog.
-3. **Permanent URLs (SET UP 2026-10-01 — one manual step left):** the named
+   **Hang-proof (2026-10-02):** the 01:03 outage happened because the
+   watchdog's `execSync` froze inside a Windows pipe while docker restarted
+   containers, and the task's "ignore new instances" policy then blocked
+   every later run. Fixed: shell calls are now spawn-with-killTree (a stalled
+   docker can never wedge a run), dead runs recreate tunnels instead of
+   restarting them (restarts can keep the dead registration), self-rotated
+   quick-tunnel URLs are adopted from container logs without any recycle,
+   and the task now uses **Queue** (a blocked run queues the next one
+   instead of skipping it) with the same 10-min time limit.
+   **New-URL grace:** a just-recreated tunnel answers 530 for ~2 min while
+   Cloudflare's edge propagates; the watchdog waits (bounded) before
+   committing URLs and treats a fresh edge registration as "propagating",
+   not "dead" — no more URL churn during heal windows.
+2. **In-server sentinel (PC only, automatic):** the site server probes the
+   free line in every watchdog cycle. If it's down AND the scheduler
+   heartbeat (`watchdog.heartbeat`, touched by every watchdog exit) is
+   stale >8 min, the server spawns the tunnel watchdog itself (fire-and-
+   forget, rate-capped 1×/20 min) and sends a 🛟 Telegram alert — so a wedged
+   scheduler can no longer leave the line down.
+3. **Server-side eyes (automatic alert):** any Dograh outage gets a 🚨 alert
+   with a **🔧 Fix: fix-dograh-tunnels** button; `/diagnose` lists it too,
+   and `/health` shows a `dograh free line` row. One tap spawns the repair
+   and reports the outcome as a follow-up message.
+4. **Permanent URLs (SET UP 2026-10-01 — one manual step left):** the named
    tunnel **secondshift-dograh** (id `59db6928-a6a1-465d-9ed9-55b81bd81328`)
    exists and runs as the `dograh-named-tunnel` container (http2, 4 edge
    connections, creds + config in the `dograh-cf-creds` docker volume).
@@ -122,7 +141,7 @@ cd "/d/my LLM/.n8n-files/website/secondshift" && node scripts/dograh-watchdog.js
    retires the quick-tunnel containers, and pushes — Render deploys the
    permanent URLs. Zero downtime, no manual commit. Quick tunnels and URL
    rotation cease to exist.
-4. **If the PC itself is down:** nothing self-hosted can answer — the site
+5. **If the PC itself is down:** nothing self-hosted can answer — the site
    correctly shows the gray offline state and the free mic + Vapi lines keep
    working. That limit is physics, not config.
 

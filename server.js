@@ -38,6 +38,10 @@ const { seed } = require('./scripts/seed');
 // (.env keys DOGRAH_API_URL/DOGRAH_UI_URL are a fallback only — a boot-time
 // read can race the watchdog's .env rewrite and go stale.)
 const DOGRAH_CFG = path.join(__dirname, 'public', 'dograh-endpoints.json');
+// heartbeat the scheduler-run watchdog appends on every pass — the in-server
+// sentinel below uses it to notice when Windows Task Scheduler is stuck
+const DOGRAH_WATCHDOG_HEARTBEAT = path.join(__dirname, 'watchdog.heartbeat');
+const DOGRAH_WATCHDOG_LOG = path.join(__dirname, 'watchdog.log');
 function dograhApiUrl() {
   try { return JSON.parse(fs.readFileSync(DOGRAH_CFG, 'utf8')).apiUrl || process.env.DOGRAH_API_URL || null; } catch (_) { return process.env.DOGRAH_API_URL || null; }
 }
@@ -54,17 +58,33 @@ async function dograhProbe() {
     return { ok: false, detail: msg.includes('abort') ? 'timeout' : msg.slice(0, 60) };
   }
 }
-/** One-tap repair: re-run the tunnel watchdog (restarts dead tunnels, updates endpoints, pushes). */
-async function runDograhWatchdog() {
-  const { execFile } = require('child_process');
-  return new Promise((resolve) => {
-    execFile(process.execPath, [path.join(__dirname, 'scripts', 'dograh-watchdog.js')],
-      { cwd: __dirname, timeout: 150000, env: { ...process.env } }, (err, stdout, stderr) => {
-        const out = String(stdout || '');
-        if (err && !/tunnel healthy/.test(out)) return resolve({ ok: false, detail: String((err && err.message) || err).slice(0, 120) + ' · ' + out.slice(-120) });
-        resolve({ ok: true, detail: out.trim().split('\n').slice(-2).join(' · ').slice(0, 200) });
-      });
-  });
+/** One-tap repair: re-run the tunnel watchdog (restarts dead tunnels, updates endpoints, pushes).
+ *  Fire-and-forget spawn (detached, unref'd) — NEVER await docker inside the
+ *  server process; the Windows pipe-hang that wedged the 01:03 scheduler run
+ *  must not be reproducible here. Result arrives in watchdog.log + heartbeat. */
+function runDograhWatchdog() {
+  const { spawn } = require('child_process');
+  const child = spawn(process.execPath, [path.join(__dirname, 'scripts', 'dograh-watchdog.js')],
+    { cwd: __dirname, env: process.env, detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  return Promise.resolve({ ok: true, detail: 'watchdog spawned (pid ' + child.pid + ') — result lands in watchdog.log within ~2 min' });
+}
+/** Scheduler-independent safety net: if the Dograh probe is down AND the
+ *  scheduler heartbeat is stale (>8 min), run the watchdog ourselves.
+ *  Rate-capped to once per 20 min; a healthy probe resets the timer. */
+let lastSentinelRun = 0;
+async function dograhSentinelIfNeeded() {
+  if (process.platform !== 'win32') return null; // PC-only: Render has no docker/tunnels to heal
+  const probe = await dograhProbe();
+  if (probe.ok) return null;
+  if (Date.now() - lastSentinelRun < 20 * 60 * 1000) return null;
+  let hbAgeMs = Infinity;
+  try { hbAgeMs = Date.now() - fs.statSync(DOGRAH_WATCHDOG_HEARTBEAT).mtimeMs; } catch (_) { /* no heartbeat yet */ }
+  if (hbAgeMs < 8 * 60 * 1000) return null; // scheduler handled it recently — don't double-run
+  lastSentinelRun = Date.now();
+  const r = await runDograhWatchdog();
+  tmon.alertWithFix('🛟 In-server sentinel — Dograh down and scheduler heartbeat stale (' + Math.round(hbAgeMs / 60000) + ' min). Running the tunnel watchdog directly: ' + (r.detail || ''), 'fix-dograh-tunnels', 'dograh-sentinel');
+  return r;
 }
 
 const app = express();
@@ -473,7 +493,7 @@ if (require.main === module) {
             const cs = store.cloudStatus();
             return cs.enabled && cs.lastError ? { ok: false, detail: 'last push/pull error: ' + cs.lastError } : null;
           } },
-        { name: 'dograh free line', run: () => dograhProbe(),
+        { name: 'dograh free line', run: async () => { await dograhSentinelIfNeeded(); return dograhProbe(); },
           diagnoseTask: 'The Dograh free voice line is unreachable from the site. Diagnose: read public/dograh-endpoints.json, check scripts/dograh-watchdog.js behavior, and report in max 5 lines whether this looks like a dead quick tunnel (needs the fix-dograh-tunnels repair), stale endpoints, or a Dograh container problem. Read-only: do not modify files or restart anything.' },
       ],
     });
@@ -560,12 +580,20 @@ if (require.main === module) {
       if (!r.ok) throw new Error(String(r.text).replace(/^❌ Agent failed: /, ''));
       return { message: '✅ Agent replied in ' + Math.round((r.durationMs || 0) / 1000) + 's — headless Codebuff relay working.' };
     });
-    tmon.registerFix('fix-dograh-tunnels', async () => {
-      const r = await runDograhWatchdog();
-      if (!r.ok) throw new Error('watchdog run failed: ' + (r.detail || 'unknown'));
-      const after = await dograhProbe();
-      if (!after.ok) throw new Error('watchdog ran but tunnel still unreachable (' + (after.detail || 'no detail') + ') — it will retry next cycle');
-      return { message: '✅ Free line back: ' + (dograhApiUrl() || '').replace(/^https:\/\//, '').slice(0, 48) };
+    tmon.registerFix('fix-dograh-tunnels', () => {
+      const r = runDograhWatchdog();
+      if (!r.ok) throw new Error('watchdog spawn failed: ' + (r.detail || 'unknown'));
+      // fire-and-forget repair — report the outcome as a follow-up message
+      // once the watchdog has had time to recreate tunnels + push endpoints
+      setTimeout(() => {
+        dograhProbe().then((after) => {
+          const msg = after.ok
+            ? '✅ fix-dograh-tunnels: free line back — ' + (dograhApiUrl() || '').replace(/^https:\/\//, '').slice(0, 48)
+            : '⚠ fix-dograh-tunnels: tunnel still unreachable (' + (after.detail || 'no detail') + ') — details in watchdog.log; retries continue automatically';
+          tmon.send(msg).catch(() => {});
+        });
+      }, 100 * 1000);
+      return { message: '🛠 Watchdog spawned — ' + (r.detail || 'repair in progress') };
     });
   } else {
     console.log('[monitor] Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — running without remote eyes');

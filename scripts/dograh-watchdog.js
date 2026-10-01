@@ -18,7 +18,7 @@
 // DOGRAH_TUNNEL_MODE=quick|named
 // Run manually: node scripts/dograh-watchdog.js
 
-const { execSync } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -46,10 +46,70 @@ const UI_TUNNEL = 'dograh-ui-tunnel';
 const PERM_API = (process.env.DOGRAH_PERM_API || 'https://voice.secondshift.space').replace(/\/$/, '');
 const PERM_UI = (process.env.DOGRAH_PERM_UI || 'https://voice-ui.secondshift.space').replace(/\/$/, '');
 
+// Windows-hardened shell runner. The previous execSync version hung forever
+// inside Node's captured stdout pipe when a child (docker on a busy daemon)
+// stalled without exiting — that wedged the 01:03 scheduler run, and the
+// task's "ignore new instances" policy then blocked every later heal. This
+// version: real timeout with killTree, no reliance on child exit to flush
+// pipes, and a stdout cap so a chatty child can't balloon memory.
 function sh(cmd, opts = {}) {
-  return execSync(cmd, { cwd: ROOT, timeout: Number(TIMEOUT) + 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
+  const timeout = Number((opts && opts.timeout) || TIMEOUT) + 5000;
+  return new Promise((resolve, reject) => {
+    let out = '', done = false;
+    let child;
+    try {
+      child = spawn(cmd, { cwd: ROOT, shell: true, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    } catch (e) { return reject(e); }
+    const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) { /* already gone */ } }, timeout);
+    child.stdout && child.stdout.on('data', (d) => { if (out.length < 400000) out += d; });
+    child.stderr && child.stderr.on('data', (d) => { if (out.length < 400000) out += d; });
+    child.on('error', (e) => { if (done) return; done = true; clearTimeout(killer); reject(e); });
+    child.on('close', (code) => {
+      if (done) return; done = true; clearTimeout(killer);
+      if (code === 0) resolve(out.trim());
+      else reject(new Error(`sh exit ${code}: ${cmd} :: ${out.trim().slice(-200)}`));
+    });
+  });
 }
 const log = (m) => console.log(`[dograh-watchdog ${new Date().toISOString()}] ${m}`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// WATCHDOG_SLEEP_MS scales all fixed waits (tests set it tiny).
+const SLEEP = Number(process.env.WATCHDOG_SLEEP_MS) || 1000;
+const HEALTH_WAIT = Number(process.env.WATCHDOG_HEALTH_WAIT_MS) || 180000;
+const POLL = 10 * SLEEP;
+// Quick-tunnel recreate args — must match the containers originally deployed
+// (see VOICE-DOGRAH.md). Recreating (rm + run) instead of restarting: a
+// restarted quick tunnel can keep retrying its dead registration ("Tunnel
+// not found" limbo) and never gets a fresh URL.
+const RECREATE_ARGS = {
+  [API_TUNNEL]: `--name ${API_TUNNEL} --restart unless-stopped --network dograh_app-network -p 2000:2000 cloudflare/cloudflared:latest tunnel --no-autoupdate --protocol http2 --url http://api:8000 --metrics 0.0.0.0:2000`,
+  [UI_TUNNEL]: `--name ${UI_TUNNEL} --restart unless-stopped --network dograh_app-network cloudflare/cloudflared:latest tunnel --no-autoupdate --protocol http2 --url http://ui:3010 --metrics 0.0.0.0:2001`,
+};
+async function recreateTunnels() {
+  await sh(`docker rm -f ${API_TUNNEL} ${UI_TUNNEL}`);
+  for (const [name, args] of Object.entries(RECREATE_ARGS)) await sh(`docker run -d ${args}`);
+}
+/** True when cloudflared registered a connection in the last 12 minutes —
+ *  the URL itself may still be propagating through Cloudflare's edge (530s),
+ *  so recycling now would just churn URLs. */
+async function freshRegistration() {
+  try {
+    const logs = await sh(`docker logs ${API_TUNNEL} --since 12m 2>&1`);
+    return /Registered tunnel connection/.test(logs);
+  } catch (e) { return false; }
+}
+/** Quick tunnels can silently re-register under a NEW url (observed on this
+ *  NAT: old name NXDOMAINs, container still up, new name in logs). When the
+ *  newest logged URL differs from the (dead) endpoints one, adopt it.
+ *  Returns true when an adoption was made (or was already current). */
+async function adoptNewerIfRotated(ep) {
+  const loggedApi = await tunnelUrl(API_TUNNEL, '--since 30m');
+  if (!loggedApi || loggedApi === ep.apiUrl) return false;
+  const loggedUi = (await tunnelUrl(UI_TUNNEL, '--since 30m')) || ep.uiUrl;
+  log(`self-rotated quick tunnel detected (${ep.apiUrl} → ${loggedApi}) — adopting newest logged URLs`);
+  await adoptUrls(loggedApi, loggedUi);
+  return true;
+}
 
 function readEndpoints() {
   try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { return {}; }
@@ -66,38 +126,23 @@ async function healthy(url) {
   } catch (e) { return false; }
 }
 
-function tunnelUrl(container, sinceArg) {
+async function tunnelUrl(container, sinceArg) {
   try {
-    const logs = sh(`docker logs ${container} ${sinceArg} 2>&1`);
-    const m = logs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+    const logs = await sh(`docker logs ${container} ${sinceArg} 2>&1`);
+    const m = logs.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/g);
     return m ? m[m.length - 1] : null; // most recent registration wins
   } catch (e) { return null; }
 }
 
 /** True when cloudflared is up but stuck retrying a server-side dead tunnel. */
-function tunnelInLimbo(container) {
+async function tunnelInLimbo(container) {
   try {
-    const logs = sh(`docker logs ${container} --since 10m 2>&1`);
+    const logs = await sh(`docker logs ${container} --since 10m 2>&1`);
     return /Tunnel not found/.test(logs);
   } catch (e) { return false; }
-}
-
-async function recycle() {
-  log(`tunnel DEAD — restarting ${API_TUNNEL} + ${UI_TUNNEL}`);
-  try { sh(`docker restart ${API_TUNNEL} ${UI_TUNNEL}`); } catch (e) { log(`restart failed: ${e.message}`); }
-  // quick tunnels print their hostname a few seconds after boot
-  await new Promise((r) => setTimeout(r, 15000));
-  let api = tunnelUrl(API_TUNNEL, '--since 2m');
-  let ui = tunnelUrl(UI_TUNNEL, '--since 2m');
-  if (!api || !ui) {
-    log('no URLs yet — one more recycle');
-    try { sh(`docker restart ${API_TUNNEL} ${UI_TUNNEL}`); } catch (e) { /* logged next parse */ }
-    await new Promise((r) => setTimeout(r, 15000));
-    api = tunnelUrl(API_TUNNEL, '--since 2m');
-    ui = tunnelUrl(UI_TUNNEL, '--since 2m');
-  }
-  if (!api || !ui) { log('ERROR: no new tunnel URLs in logs — giving up this run'); process.exit(1); }
-
+}/** Shared tail for adopting a set of URLs: no-op guard, endpoints + .env,
+ *  commit + push (only when URLs actually changed). */
+async function adoptUrls(api, ui) {
   const prev = readEndpoints();
   if (prev.apiUrl === api && prev.uiUrl === ui) {
     log(`URLs unchanged (${api}) — file already current, skipping commit`);
@@ -114,17 +159,43 @@ async function recycle() {
     set('DOGRAH_API_URL', api); set('DOGRAH_UI_URL', ui);
     fs.writeFileSync(ENVFILE, env);
   } catch (e) { /* .env optional */ }
-  log(`new URLs: api=${api} ui=${ui} — verifying`);
-  await new Promise((r) => setTimeout(r, 5000));
-  if (!(await healthy(api))) log('WARNING: new API tunnel not healthy yet (may need another cycle)');
+  log(`new URLs: api=${api} ui=${ui} — committing`);
   try {
-    sh('git add public/dograh-endpoints.json');
-    sh(`git commit -m "chore: refresh Dograh tunnel endpoints (watchdog)"`);
-    sh(`git push origin ${BRANCH}`);
+    await sh('git add public/dograh-endpoints.json');
+    await sh(`git commit -m "chore: refresh Dograh tunnel endpoints (watchdog)"`);
+    await sh(`git push origin ${BRANCH}`);
     log('pushed — Render will auto-deploy the new endpoints');
   } catch (e) {
     log(`git push failed: ${String(e.message).slice(0, 200)} (file updated locally; will retry next run)`);
   }
+}
+
+async function recycle() {
+  log(`tunnel DEAD — recreating ${API_TUNNEL} + ${UI_TUNNEL} (fresh registrations)`);
+  try { await recreateTunnels(); } catch (e) { log(`recreate failed: ${e.message}`); }
+  // quick tunnels print their hostname a few seconds after boot
+  await sleep(15 * SLEEP);
+  let api = await tunnelUrl(API_TUNNEL, '--since 2m');
+  let ui = await tunnelUrl(UI_TUNNEL, '--since 2m');
+  if (!api || !ui) {
+    log('no URLs yet — one more recreate');
+    try { await recreateTunnels(); } catch (e) { /* logged next parse */ }
+    await sleep(15 * SLEEP);
+    api = await tunnelUrl(API_TUNNEL, '--since 2m');
+    ui = await tunnelUrl(UI_TUNNEL, '--since 2m');
+  }
+  if (!api || !ui) { log('ERROR: no new tunnel URLs in logs — giving up this run'); process.exit(1); }
+
+  // Edge propagation for a brand-new quick URL can take a couple of minutes
+  // (530s until then). Wait — bounded — so we never commit URLs we never saw
+  // answer; the freshRegistration() grace protects the next cycles meanwhile.
+  log(`waiting up to ${Math.round(HEALTH_WAIT / 1000)}s for the new tunnels to answer…`);
+  const deadline = Date.now() + HEALTH_WAIT;
+  let ok = false;
+  while (Date.now() < deadline) { if (await healthy(api)) { ok = true; break; } await sleep(POLL); }
+  if (!ok) log('WARNING: new tunnels not answering yet — committing anyway; grace logic protects the next runs');
+
+  await adoptUrls(api, ui);
 }
 
 async function main() {
@@ -141,12 +212,13 @@ async function main() {
       const set = (k, v) => { env = new RegExp(`^${k}=.*$`, 'm').test(env) ? env.replace(new RegExp(`^${k}=.*$`, 'm'), `${k}=${v}`) : env + (env && !env.endsWith('\n') ? '\n' : '') + `${k}=${v}\n`; };
       set('DOGRAH_API_URL', PERM_API); set('DOGRAH_UI_URL', PERM_UI); set('DOGRAH_TUNNEL_MODE', 'named');
       fs.writeFileSync(ENVFILE, env);
-    } catch (e) { /* .env optional */ }
-    try { sh(`docker rm -f ${API_TUNNEL} ${UI_TUNNEL}`); log('quick-tunnel containers retired'); } catch (e) { log(`quick-tunnel cleanup skipped: ${e.message}`); }
+    } catch (e) { /* .env optional */ }    try {
+      await sh(`docker rm -f ${API_TUNNEL} ${UI_TUNNEL}`); log('quick-tunnel containers retired');
+    } catch (e) { log(`quick-tunnel cleanup skipped: ${e.message}`); }
     try {
-      sh('git add public/dograh-endpoints.json');
-      sh(`git commit -m "chore: switch Dograh free line to permanent tunnel URLs (watchdog)"`);
-      sh(`git push origin ${BRANCH}`);
+      await sh('git add public/dograh-endpoints.json');
+      await sh(`git commit -m "chore: switch Dograh free line to permanent tunnel URLs (watchdog)"`);
+      await sh(`git push origin ${BRANCH}`);
       log('pushed — Render will deploy the permanent URLs');
     } catch (e) {
       log(`git push failed: ${String(e.message).slice(0, 200)} (file updated locally)`);
@@ -162,7 +234,7 @@ async function main() {
   }
 
   if (await healthy(ep.apiUrl)) {
-    if (tunnelInLimbo(API_TUNNEL)) {
+    if (await tunnelInLimbo(API_TUNNEL)) {
       // URL answers but cloudflared keeps retrying a dead registration —
       // this is the 21-hour crash-loop state; recycle before it rots.
       log('tunnel answers but cloudflared is in limbo (Tunnel not found) — recycling proactively');
@@ -170,10 +242,23 @@ async function main() {
     } else {
       log(`tunnel healthy: ${ep.apiUrl}`);
     }
+  } else if (await adoptNewerIfRotated(ep)) {
+    // quick-tunnel re-registered itself under a NEW url (observed on this
+    // NAT) — adopt the newest logged URLs instead of recycling containers
+    // that are perfectly alive.
+  } else if (await freshRegistration()) {
+    // dead URL but cloudflared just (re)registered — the 530 is propagation,
+    // not a dead tunnel; recycling here would churn URLs every 5 minutes.
+    log('tunnel dead but a fresh edge registration exists — URL propagation; waiting for next cycle');
   } else {
     await recycle();
   }
   log('done');
 }
+
+// heartbeat: the in-server sentinel (server.js) stats this file to decide
+// whether the scheduler is actually running us — if the mtime goes stale
+// while the free line is down, the server runs the watchdog itself.
+process.on('exit', () => { try { fs.writeFileSync(path.join(ROOT, 'watchdog.heartbeat'), String(Date.now())); } catch (_) { /* best effort */ } });
 
 main().catch((e) => { log(`FATAL ${e.stack || e}`); process.exit(1); });

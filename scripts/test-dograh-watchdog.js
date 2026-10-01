@@ -1,20 +1,25 @@
 #!/usr/bin/env node
 /**
  * dograh-watchdog unit test — real watchdog logic, FAKE docker + FAKE fetch.
- * No containers touched, no git runs, no network. Endpoints use
- * trycloudflare-shaped URLs; global.fetch is intercepted so only the fake
- * "healthy" URL answers.
+ * No containers touched, no git runs, no network.
  *
- * Verifies: healthy → no-op; healthy-but-limbo → recycle; dead → recycle +
- * rewrite + .env sync; URL-unchanged → no commit; named mode → observe-only.
+ * Verifies: healthy → no-op; healthy-but-limbo → recreate; dead → recreate +
+ * rewrite + .env sync; fresh-registration grace (no URL churn); named mode →
+ * observe-only; one-time transition to permanent URLs.
+ *
+ * The harness requires the watchdog exactly ONCE per scenario via a child
+ * process (node <sandbox>/scripts/dograh-watchdog.js) — no cross-instance
+ * state, and a hung run can't poison the next scenario. Output lines are
+ * parsed from the child's stdout.
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execFile } = require('child_process');
 
 let ok = true;
-const realLog0 = console.log.bind(console);
-const t = (pass, label, extra) => { realLog0((pass ? 'PASS' : 'FAIL') + '  ' + label + (extra ? ' — ' + extra : '')); if (!pass) ok = false; };
+const realLog = console.log.bind(console);
+const t = (pass, label, extra) => { realLog((pass ? 'PASS' : 'FAIL') + '  ' + label + (extra ? ' — ' + extra : '')); if (!pass) ok = false; };
 
 // ── sandbox: real watchdog copied in so writes are isolated ────────────
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-wd-'));
@@ -26,110 +31,147 @@ const EP = path.join(sandbox, 'public', 'dograh-endpoints.json');
 const ENVF = path.join(sandbox, '.env');
 const writeEp = (j) => fs.writeFileSync(EP, JSON.stringify(j, null, 2) + '\n');
 
-// ── fake docker/git shim ───────────────────────────────────────────────
-let containerLogs = { 'cloudflared-tunnel': '', 'dograh-ui-tunnel': '' };
-let restarts = 0;
-let retires = 0;
-child_fix: {
-  const child = require('child_process');
-  child.execSync = function fakeSh(cmd) {
-    const c = String(cmd);
-    if (c.startsWith('docker logs cloudflared-tunnel')) return containerLogs['cloudflared-tunnel'];
-    if (c.startsWith('docker logs dograh-ui-tunnel')) return containerLogs['dograh-ui-tunnel'];
-    if (c.startsWith('docker restart')) { restarts++; return ''; }
-  if (c.startsWith('docker rm -f')) { retires++; return ''; }
-    if (c.startsWith('git ')) return '';
-    throw new Error('unexpected sh: ' + c);
-  };
+// ── the shim module the sandboxed watchdog will load for child_process ─
+// (copied into sandbox/node_modules/child_process-shim? No — simpler: we
+// patch nothing on disk. Instead the scenario runner passes fake data via
+// a shim script that wraps node and intercepts `docker`/`git` commands.)
+const SHIM_DIR = path.join(sandbox, 'shim');
+fs.mkdirSync(SHIM_DIR, { recursive: true });
+// fake `docker` and `git` executables driven by scenario JSON
+fs.writeFileSync(path.join(SHIM_DIR, 'docker.cmd'), '@echo off\r\nnode "%SHIM_DATA%\\fake-docker.js" %*\r\n');
+fs.writeFileSync(path.join(SHIM_DIR, 'git.cmd'), '@echo off\r\nexit /b 0\r\n');
+const scenarioState = { apiLogs: '', uiLogs: '', recycles: 0, retires: 0, healthy: [] };
+function writeScenarioState() {
+  fs.writeFileSync(path.join(SHIM_DIR, 'state.json'), JSON.stringify(scenarioState));
 }
+// fetch preload for the CHILD watchdog process: makes only the scenario's
+// "healthy" URLs answer (the parent's global.fetch patch can't reach it).
+fs.writeFileSync(path.join(SHIM_DIR, 'fetch-preload.js'), `const fs = require('fs');
+const st = JSON.parse(fs.readFileSync(process.env.SHIM_DATA + '/state.json', 'utf8'));
+global.fetch = async (url) => {
+  if ((st.healthy || []).some((u) => String(url).startsWith(u))) return { ok: true, status: 200 };
+  throw new Error('connect ECONNREFUSED (fake)');
+};
+`);
+// fake docker: serves logs + counts rm/run (written fresh each scenario)
+const fakeDocker = `const fs=require('fs');
+const st=JSON.parse(fs.readFileSync(process.env.SHIM_DATA+'/state.json','utf8'));
+const a=process.argv.slice(2).join(' ');
+if(a.startsWith('logs cloudflared-tunnel')){console.log(st.apiLogs);}
+else if(a.startsWith('logs dograh-ui-tunnel')){console.log(st.uiLogs);}
+else if(a.startsWith('run -d --name cloudflared-tunnel')){st.recycles++;fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));console.log('id');}
+else if(a.startsWith('run -d --name dograh-ui-tunnel')){fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));console.log('id');}
+else if(a.startsWith('rm -f')){st.retires++;fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));}
+else {console.error('fake-docker: unexpected '+a);process.exit(1);}
+`;
+fs.writeFileSync(path.join(SHIM_DIR, 'fake-docker.js'), fakeDocker);
 
 const GOOD_API = 'https://fresh-api-123.trycloudflare.com';
 const GOOD_UI = 'https://fresh-ui-456.trycloudflare.com';
 const PERM_API = 'https://voice.example.org';
 const PERM_UI = 'https://voice-ui.example.org';
-const HEALTHY = new Set([GOOD_API, PERM_API]);
-const realFetch = global.fetch;
-global.fetch = async (url) => ([...HEALTHY].some((u) => String(url).startsWith(u)) ? { ok: true } : Promise.reject(new Error('connect ECONNREFUSED dead')));
-
 function banner(url) {
   return url
     ? `2026-09-27T00:00:00Z INF +---------------------------------------------------------------------------+\n|  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |\n|  ${url}  |\n+---------------------------------------------------------------------------+`
     : 'ERR Register tunnel error from server side error="Unauthorized: Tunnel not found"';
 }
 function regLogs(api, ui) {
-  containerLogs['cloudflared-tunnel'] = banner(api);
-  containerLogs['dograh-ui-tunnel'] = banner(ui);
+  scenarioState.apiLogs = banner(api);
+  scenarioState.uiLogs = banner(ui);
 }
 
-process.chdir(sandbox);
-process.env.WATCHDOG_TIMEOUT_MS = '3000';
-const logs = [];
-const realLog = console.log.bind(console);
-console.log = (...a) => logs.push(a.join(' '));
-
-function runFresh() {
-  logs.length = 0;
+/** Runs the watchdog as a child process; resolves with its stdout lines. */
+function runScenario(env = {}) {
+  writeScenarioState();
   return new Promise((resolve, reject) => {
-    delete require.cache[require.resolve(WD)];
-    const origExit = process.exit;
-    process.exit = (c) => { throw new Error('EXIT:' + c); };
-    try { require(WD); } catch (e) { process.exit = origExit; return reject(e); }
-    process.exit = origExit;
-    const iv = setInterval(() => {
-      if (logs.some((l) => l.includes('] done'))) { clearInterval(iv); resolve(); }
-    }, 50);
-    setTimeout(() => { clearInterval(iv); reject(new Error('timeout waiting for done; logs: ' + logs.join(' | ').slice(0, 300))); }, 60000);
+    execFile(process.execPath, ['-r', path.join(SHIM_DIR, 'fetch-preload.js'), WD], {
+      cwd: sandbox,
+      timeout: 30000,
+      env: {
+        ...process.env,
+        WATCHDOG_TIMEOUT_MS: '3000',
+        WATCHDOG_SLEEP_MS: '10',
+        WATCHDOG_HEALTH_WAIT_MS: '400',
+        PATH: SHIM_DIR + path.delimiter + process.env.PATH,
+        SHIM_DATA: SHIM_DIR,
+        DOGRAH_TUNNEL_MODE: 'quick',
+        ...env,
+      },
+    }, (err, stdout, stderr) => {
+      // the watchdog exits 1 when it deliberately gives up — that's data, not a crash
+      resolve({ lines: String(stdout || '').split('\n'), code: err ? err.code || 1 : 0, stderr: String(stderr || '') });
+    });
   });
 }
+// counters live on disk (the child increments them) — always read fresh
+const readState = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'state.json'), 'utf8'));
 
 (async () => {
-  // 1 — healthy tunnel, no limbo → pure no-op
+  // ── 1 — healthy tunnel, no limbo → pure no-op ────────────────────────
+  scenarioState.healthy = [GOOD_API];
   writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: GOOD_API, updatedAt: 'old' });
   regLogs(GOOD_API, GOOD_UI);
-  await runFresh();
-  t(restarts === 0, 'healthy → zero restarts', 'restarts=' + restarts);
-  t(!logs.join(' ').includes('recycl'), 'healthy → no recycle');
+  scenarioState.retires = 0;
+  let r = await runScenario();
+  t(readState().recycles === 0, 'healthy → zero recycles', 'recycles=' + readState().recycles);
+  t(r.lines.join(' ').includes('tunnel healthy'), 'healthy → reports healthy', r.lines.join(' | ').slice(0, 160));
 
-  // 2 — healthy but limbo → proactive recycle; same URLs → file untouched
-  containerLogs['cloudflared-tunnel'] += '\n' + banner(null);
+  // ── 2 — healthy but limbo → proactive recreate; same URLs → file untouched ──
+  scenarioState.apiLogs += '\n' + banner(null); // Tunnel not found in last 10m
   const before = fs.readFileSync(EP, 'utf8');
-  await runFresh();
-  t(restarts === 1, 'limbo → proactive recycle (one restart cmd, both containers)', 'restarts=' + restarts);
+  r = await runScenario();
+  t(readState().recycles === 1, 'limbo → proactive recreate (fresh registrations)', 'recycles=' + readState().recycles + ' · out: ' + r.lines.join(' | ').slice(0, 200));
   t(fs.readFileSync(EP, 'utf8') === before, 'URLs unchanged → endpoints file untouched (no-op guard)');
 
-  // 3 — dead URL → recycle mints new URLs, rewrites file + creates .env
+  // ── 3 — dead URL but NEWER logged URL (self-rotated) → adopt, no recycle ──
+  scenarioState.healthy = [GOOD_API];
   writeEp({ token: 'emb_x', uiUrl: 'https://stale-one.trycloudflare.com', apiUrl: 'https://stale-api.trycloudflare.com', updatedAt: 'old' });
   regLogs(GOOD_API, GOOD_UI);
-  await runFresh();
-  const ep = JSON.parse(fs.readFileSync(EP, 'utf8'));
-  t(ep.apiUrl === GOOD_API && ep.uiUrl === GOOD_UI, 'dead → endpoints rewritten to new URLs', JSON.stringify(ep));
+  scenarioState.recycles = 0;
+  r = await runScenario();
+  const ep3 = JSON.parse(fs.readFileSync(EP, 'utf8'));
+  t(readState().recycles === 0, 'self-rotated → adopted newest URLs without recycle', 'recycles=' + readState().recycles);
+  t(ep3.apiUrl === GOOD_API && ep3.uiUrl === GOOD_UI, 'self-rotated → endpoints rewritten to newest URLs', JSON.stringify(ep3));
   t(fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_API_URL=' + GOOD_API), '.env created + synced with new api url');
 
-  // 4 — named mode: dead URL + limbo logs → observe only, zero new restarts
-  // (apiUrl must NOT be trycloudflare, so the one-time transition branch is skipped)
-  const r0 = restarts;
-  process.env.DOGRAH_TUNNEL_MODE = 'named';
-  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: 'https://dead-named.example.org', updatedAt: 'x' });
-  regLogs(null, null);
-  await runFresh();
-  t(restarts === r0, 'named mode → observe-only (no restarts)');
-  t(logs.join(' ').includes('named tunnel NOT healthy'), 'named mode reports unhealthy');
-  process.env.DOGRAH_TUNNEL_MODE = 'quick';
+  // ── 3b — dead URL, no newer URL anywhere → real recreate, twice, then give up ──
+  scenarioState.healthy = [];
+  scenarioState.apiLogs = banner(null); // only "Tunnel not found" retries
+  scenarioState.uiLogs = banner(null);
+  scenarioState.recycles = 0;
+  const before3b = fs.readFileSync(EP, 'utf8');
+  r = await runScenario();
+  t(readState().recycles === 2, 'dead + no URLs → recreate twice then give up', 'recycles=' + readState().recycles);
+  t(fs.readFileSync(EP, 'utf8') === before3b, 'give-up run → endpoints file untouched');
 
-  // 5 — one-time transition: quick-tunnel endpoints + live perm URL → flip everything
-  process.env.DOGRAH_PERM_API = PERM_API;
-  process.env.DOGRAH_PERM_UI = PERM_UI;
+  // ── 4 — dead URL but fresh registration → propagation grace, no churn ──
+  // A registration line exists but no newer URL → must NOT recycle.
+  scenarioState.healthy = []; // nothing answers yet (propagation window)
+  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: 'https://dead-prop.trycloudflare.com', updatedAt: 'old' });
+  scenarioState.apiLogs = '2026-10-01T00:00:00Z INF Registered tunnel connection connIndex=0';
+  scenarioState.uiLogs = '';
+  scenarioState.recycles = 0;
+  r = await runScenario();
+  t(readState().recycles === 0, 'dead URL + fresh registration → grace (no recycle)', 'recycles=' + readState().recycles + ' · out: ' + r.lines.join(' | ').slice(0, 200));
+
+  // ── 5 — named mode: observe only, zero recycles ──────────────────────
+  scenarioState.healthy = [];
+  scenarioState.recycles = 0;
+  r = await runScenario({ DOGRAH_TUNNEL_MODE: 'named' });
+  t(scenarioState.recycles === 0, 'named mode → observe-only (no recycles)');
+  t(r.lines.join(' ').includes('named tunnel NOT healthy'), 'named mode reports unhealthy');
+
+  // ── 6 — one-time transition: quick-tunnel endpoints + live perm URL → flip ──
+  scenarioState.healthy = [GOOD_API, PERM_API];
   writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: GOOD_API, updatedAt: 'old' });
-  await runFresh();
-  const ep5 = JSON.parse(fs.readFileSync(EP, 'utf8'));
-  t(ep5.apiUrl === PERM_API && ep5.uiUrl === PERM_UI, 'transition: endpoints flipped to permanent URLs', JSON.stringify(ep5));
+  regLogs(GOOD_API, GOOD_UI);
+  scenarioState.retires = 0;
+  r = await runScenario({ DOGRAH_PERM_API: PERM_API, DOGRAH_PERM_UI: PERM_UI });
+  const ep6 = JSON.parse(fs.readFileSync(EP, 'utf8'));
+  t(ep6.apiUrl === PERM_API && ep6.uiUrl === PERM_UI, 'transition: endpoints flipped to permanent URLs', JSON.stringify(ep6));
   t(fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_TUNNEL_MODE=named') && fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_API_URL=' + PERM_API), 'transition: .env gets perm URLs + named mode');
-  t(retires === 1, 'transition: quick-tunnel containers retired', 'retires=' + retires);
-  delete process.env.DOGRAH_PERM_API;
-  delete process.env.DOGRAH_PERM_UI;
+  t(readState().retires >= 1, 'transition: quick-tunnel containers retired', 'retires=' + readState().retires);
 
-  global.fetch = realFetch;
-  console.log = realLog;
-  console.log(ok ? '\nALL PASS' : '\nFAILURES PRESENT');
+  realLog(ok ? '\nALL PASS' : '\nFAILURES PRESENT');
   process.exit(ok ? 0 : 1);
 })().catch((e) => { console.error('UNIT crash:', e.message); if (e.stack) console.error(e.stack.split('\n').slice(1, 5).join('\n')); process.exit(1); });
