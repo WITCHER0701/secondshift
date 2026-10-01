@@ -29,7 +29,7 @@ X = 262  # mobile-safe: LinkedIn's app crops ~225px off each edge of 1584px
 # name
 d.text((X, 108), "Rishi Raj Singh", font=f_name, fill="#f5f5f7")
 # subtitle
-d.text((X, 196), "I build AI employees for small businesses —", font=f_sub, fill="#a1a1a6")
+d.text((X, 196), "I build SI employees for small businesses —", font=f_sub, fill="#a1a1a6")
 d.text((X, 238), "they answer the phone, chase reviews and book jobs 24/7.", font=f_sub, fill="#a1a1a6")
 # accent link
 d.text((X, 312), "secondshift.space", font=f_small, fill="#2997ff")

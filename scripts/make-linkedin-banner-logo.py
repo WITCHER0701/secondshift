@@ -52,7 +52,7 @@ AR = "C:/Windows/Fonts/arialbd.ttf"
 AR_R = "C:/Windows/Fonts/arial.ttf"
 f_tag = ImageFont.truetype(AR_R, 38)
 f_site = ImageFont.truetype(AR, 30)
-tag = "AI employees for small businesses · phone, reviews, bookings — 24/7"
+tag = "SI (Super Intelligence) employees for small businesses · phone, reviews, bookings — 24/7"
 bb = d.textbbox((0, 0), tag, font=f_tag)
 tw = bb[2] - bb[0]
 d.text(((W2 - tw) // 2, 560), tag, font=f_tag, fill="#a1a1a6")

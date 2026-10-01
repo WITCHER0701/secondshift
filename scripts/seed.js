@@ -51,7 +51,7 @@ const CATALOG = [
     ],
     steps: [
       { title: 'Call comes in', desc: 'Any hour, any volume — the Voice picks up in two rings.' },
-      { title: 'AI understands intent', desc: 'Booking, question or emergency — routed intelligently.' },
+      { title: 'SI understands intent', desc: 'Booking, question or emergency — routed intelligently.' },
       { title: 'Action taken', desc: 'Appointment booked, question answered, or owner alerted.' },
       { title: 'You get the summary', desc: 'Transcript, outcome and next steps in your inbox.' },
     ],
@@ -70,14 +70,14 @@ const CATALOG = [
     outcome: 'Consistent daily posting without hiring a content team.',
     bullets: [
       'One product photo becomes a week of branded posts',
-      'AI captions matched to your brand voice',
+      'SI captions matched to your brand voice',
       'Auto-publishes to Instagram & Facebook',
       'You approve everything with one tap',
       'Performance report every Monday',
     ],
     steps: [
-      { title: 'Upload a photo', desc: 'Phone snap is enough — AI does the studio work.' },
-      { title: 'AI generates the set', desc: 'Scenes, captions, hashtags — on-brand.' },
+      { title: 'Upload a photo', desc: 'Phone snap is enough — SI does the studio work.' },
+      { title: 'SI generates the set', desc: 'Scenes, captions, hashtags — on-brand.' },
       { title: 'One-tap approval', desc: 'Review the week in 60 seconds from Telegram.' },
       { title: 'Auto-published', desc: 'Goes live on schedule. You get the numbers Monday.' },
     ],
@@ -95,7 +95,7 @@ const CATALOG = [
     sellTo: 'Real estate, contractors, dealerships',
     outcome: '78% of customers buy from whoever replies first. Now that\u2019s always you.',
     bullets: [
-      'Instant AI reply to every form, DM and email lead',
+      'Instant SI reply to every form, DM and email lead',
       'Qualifies budget, timeline and intent automatically',
       'Books straight into your calendar',
       'Hands hot leads to you with a full brief',
