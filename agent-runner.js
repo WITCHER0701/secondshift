@@ -38,8 +38,9 @@ const BACKEND = (process.env.AGENT_BACKEND || '').toLowerCase(); // '' | 'openro
 const TIMEOUT_MS = (() => { const n = parseInt(process.env.AGENT_TIMEOUT_MS, 10); return n > 0 ? n : 8 * 60 * 1000; })();
 const REPLY_MAX = 3600;
 const FREE_MODELS = (process.env.AGENT_FREE_MODELS ||
-  'qwen/qwen3.8-27b:free,nvidia/nemotron-3-super-120b-a12b:free,cohere/north-mini-code:free')
+  'qwen/qwen3.8-27b:free,cohere/north-mini-code:free,nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free,poolside/laguna-s-2.1:free')
   .split(',').map((s) => s.trim()).filter(Boolean);
+const CALL_TIMEOUT_MS = parseInt(process.env.AGENT_CALL_TIMEOUT_MS, 10) || 45000; // per model call — Telegram users wait
 const MAX_STEPS = parseInt(process.env.AGENT_MAX_STEPS, 10) || 30;
 
 const state = {
@@ -146,7 +147,7 @@ function runToolSync(name, args) {
 
 async function chatOnce(model, messages) {
   const ac = new AbortController();
-  const to = setTimeout(() => ac.abort(), 120000);
+  const to = setTimeout(() => ac.abort(), CALL_TIMEOUT_MS);
   try {
     const res = await fetch(OR_BASE + '/chat/completions', {
       method: 'POST',
@@ -156,21 +157,34 @@ async function chatOnce(model, messages) {
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error('openrouter ' + res.status + ' ' + ((j.error && j.error.message) || '').slice(0, 120));
-    return j.choices && j.choices[0] && j.choices[0].message;
+    const m = j.choices && j.choices[0] && j.choices[0].message;
+    if (!m || typeof m !== 'object') throw new Error('model ' + model + ' returned an empty message — treating as model failure');
+    return m;
   } finally { clearTimeout(to); }
 }
 
 async function runOpenRouter(task, { onUpdate }) {
+  const t0 = Date.now();
+  const reserve = Math.min(20000, Math.floor(TIMEOUT_MS * 0.25)); // leave room for a clean reply
+  const budgetExceeded = () => Date.now() - t0 > TIMEOUT_MS - reserve;
   const messages = [
     { role: 'system', content: SYSTEM_RULES + '\nRepo root is the cwd. Use the tools to inspect and change files. Call finish when done.' },
     { role: 'user', content: String(task).slice(0, 4000) },
   ];
   let lastErr = null;
   for (const model of FREE_MODELS) {
+    if (budgetExceeded()) break;
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
-        const msg = await chatOnce(model, messages);
-        messages.push(msg);
+        if (budgetExceeded()) throw new Error('aborted by timeout');
+        let msg;
+        try {
+          msg = await chatOnce(model, messages);
+        } catch (e) {
+          if (/429|rate/.test(String((e && e.message) || e))) await new Promise((r) => setTimeout(r, 4000)); // brief backoff, then next model via outer catch
+          throw e;
+        }
+        messages.push(msg); // guaranteed non-null by chatOnce
         const calls = msg.tool_calls || [];
         if (!calls.length) return (msg.content || '').trim() || '(model finished without a summary)';
         const toolMsgs = [];
@@ -191,11 +205,13 @@ async function runOpenRouter(task, { onUpdate }) {
       }
       return '(hit the step ceiling before finishing — partial work may exist on disk)';
     } catch (e) {
+      if (/aborted by timeout/.test(String((e && e.message) || e))) throw e; // out of total budget — stop the chain
       lastErr = e;
       onUpdate('⚠ model ' + model + ' failed (' + String((e && e.message) || e).slice(0, 80) + ') — trying the next free model');
     }
   }
-  throw lastErr || new Error('all free models failed');
+  if (budgetExceeded()) throw new Error('aborted by timeout');
+  throw lastErr || new Error('all free models failed — the free pool is busy right now, try again in a minute');
 }
 
 // ══ Brain 2: Codebuff SDK (credits / fallback) ════════════════════════
