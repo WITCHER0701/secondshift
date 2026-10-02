@@ -341,13 +341,38 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
   async function handleFix(name) {
     const fn = fixHandlers[name];
     if (!fn) return reply('❓ No fix registered as "' + name + '" — try /fix');
-    await reply('🔧 Running fix: ' + name + '…');
-    try {
-      const r = await fn();
-      return reply(r && r.message ? r.message : '✅ Fix "' + name + '" done.');
-    } catch (e) {
-      return reply('❌ Fix "' + name + '" failed: ' + String((e && e.message) || e).slice(0, 250));
+    const run = async () => {
+      try {
+        const r = await fn();
+        return reply(r && r.message ? r.message : '✅ Fix "' + name + '" done.');
+      } catch (e) {
+        return reply('❌ Fix "' + name + '" failed: ' + String((e && e.message) || e).slice(0, 250));
+      }
+    };
+    const runSync = () => {
+      try {
+        fn();
+      } catch (e) {
+        return reply('❌ Fix "' + name + '" failed to start: ' + String((e && e.message) || e).slice(0, 250));
+      }
+    };
+    // /agent and /agentstatus live inside the command loop — they answer
+    // asynchronously; /fix must not await anything and must answer instantly.
+    if (name === 'agenthealth') {
+      // health check for the agent relay — reads the real state, no dispatch
+      const a = agentRunner.status();
+      const txt = a.enabled
+        ? a.backend + ' · runs=' + a.runs + ' failed=' + a.failed + (a.lastError ? ' · lastError: ' + a.lastError.slice(0, 100) : '')
+        : 'Agent runner inactive — set OPENROUTER_API_KEY (free) in .env on the PC.';
+      reply('🤖 ' + txt);
+      return;
     }
+    if (name === 'fix-dograh-tunnels') {
+      // fire-and-forget — see the follow-up message for the outcome
+      runSync().catch(() => reply('⚠ fix-dograh-tunnels failed to start — watchdog not running'));
+      return;
+    }
+    return run();
   }
   async function handle(text) {
     const cmd = String(text || '').trim().split(/[\s@]/)[0].toLowerCase();
@@ -390,7 +415,7 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
     state.commands.replies[cmd] = (state.commands.replies[cmd] || 0) + 1;
     const a = agentRunner.status();
     if (cmd === '/agentstatus') {
-      if (!a.enabled) return reply('Agent runner inactive — set OPENROUTER_API_KEY (free) in .env on the PC, or run `npx codebuff login` there.');
+      if (!a.enabled) return reply('Agent runner inactive — add OPENROUTER_API_KEY (free from openrouter.ai/keys) to .env on the PC, then tap /agentstatus again.');
       const lines = [
         '🤖 Agent runner — backend ' + a.backend + (a.backend === 'openrouter' ? ' (free models: ' + (a.models || []).slice(0, 2).join(', ') + (a.models.length > 2 ? '…' : '') + ')' : ''),
         a.running

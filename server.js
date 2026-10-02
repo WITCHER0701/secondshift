@@ -574,11 +574,22 @@ if (require.main === module) {
       if (!r.ok || !txt) throw new Error('HTTP ' + r.status + ' — brain did not reply');
       return { message: '✅ Brain replied in ' + (Date.now() - t0) + 'ms: "' + String(txt).slice(0, 120) + '"' };
     });
-    tmon.registerFix('test-agent', async () => {
-      if (!agentRunner.enabled) throw new Error('no Codebuff auth on the PC — run `npx codebuff login` there');
-      const r = await agentRunner.runTask('Health ping: reply with exactly AGENT-OK and nothing else. Do not read or modify any files.', {});
-      if (!r.ok) throw new Error(String(r.text).replace(/^❌ Agent failed: /, ''));
-      return { message: '✅ Agent replied in ' + Math.round((r.durationMs || 0) / 1000) + 's — headless Codebuff relay working.' };
+    tmon.registerFix('test-agent', () => {
+      if (!agentRunner.enabled) return { message: '🤖 Agent runner inactive — add OPENROUTER_API_KEY (free from openrouter.ai/keys) to .env on the PC, then tap this again.' };
+      const st = agentRunner.status();
+      if (st.running) return { message: '⏳ Agent is already running — /agentstatus to check on it.' };
+      // fire-and-forget health ping — instant ack here, result arrives as a follow-up message
+      agentRunner.runTask('Health ping: reply with exactly AGENT-OK and nothing else. Do not read or modify any files.', {})
+        .then((r) => tmon.send(r.ok
+          ? '✅ test-agent: voice-agent brain replied in ' + Math.round((r.durationMs || 0) / 1000) + 's — relay is live.'
+          : '❌ test-agent: ' + String(r.text || 'no detail').replace(/^❌ Agent failed: /, '').slice(0, 220)))
+        .catch(() => {});
+      return { message: '🧪 Agent health ping dispatched — result follows in a moment.' };
+    });
+    tmon.registerFix('agenthealth', () => {
+      if (!agentRunner.enabled) return { message: '🤖 Agent runner inactive — add OPENROUTER_API_KEY (free from openrouter.ai/keys) to .env on the PC.' };
+      const a = agentRunner.status();
+      return { message: '🤖 ' + a.backend + ' · runs=' + a.runs + ' failed=' + a.failed + (a.running ? ' · RUNNING now' : ' · idle') + (a.lastError ? ' · lastError: ' + String(a.lastError).slice(0, 100) : '') };
     });
     tmon.registerFix('fix-dograh-tunnels', () => {
       const r = runDograhWatchdog();

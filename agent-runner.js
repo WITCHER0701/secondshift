@@ -22,15 +22,30 @@ const os = require('os');
 const path = require('path');
 
 // ── auth: OpenRouter first, Codebuff as fallback ───────────────────────
-const OR_KEY = process.env.OPENROUTER_API_KEY || '';
 const OR_BASE = (process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
-let CB_TOKEN = process.env.CODEBUFF_API_KEY || '';
-if (!CB_TOKEN) {
+
+// ── live auth (never stale) ────────────────────────────────────────────
+// Re-read .env when the OpenRouter key was added after this process started,
+// so dropping a key into .env activates the agent WITHOUT a server restart.
+function orKey() {
+  if (process.env.OPENROUTER_API_KEY) return process.env.OPENROUTER_API_KEY;
   try {
-    CB_TOKEN = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.config', 'manicode', 'credentials.json'), 'utf8')).default.authToken || '';
-  } catch (_) { CB_TOKEN = ''; }
+    const line = fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/\r?\n/).find((l) => /^OPENROUTER_API_KEY=/.test(l));
+    const v = line && line.split('=').slice(1).join('=').replace(/^["']|["']$/g, '').trim();
+    if (v) { process.env.OPENROUTER_API_KEY = v; return v; }
+  } catch (_) {}
+  return '';
 }
-const enabled = !!(OR_KEY || CB_TOKEN);
+let _cbToken = null;
+function cbToken() {
+  if (process.env.CODEBUFF_API_KEY) return process.env.CODEBUFF_API_KEY;
+  if (_cbToken !== null) return _cbToken;
+  try {
+    _cbToken = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.config', 'manicode', 'credentials.json'), 'utf8')).default.authToken || '';
+  } catch (_) { _cbToken = ''; }
+  return _cbToken;
+}
+function isEnabled() { return !!(orKey() || cbToken()); }
 
 // ── tuning ─────────────────────────────────────────────────────────────
 const REPO_ROOT = path.resolve(__dirname);
@@ -64,7 +79,7 @@ function describeError(err) {
       : 'Codebuff account is out of credits — set OPENROUTER_API_KEY (free) in .env to use free models, or top up at https://www.codebuff.com/usage.';
   }
   if (s.includes('401') || s.includes('403') || s.includes('Unauthorized') || s.includes('Invalid API key')) {
-    return 'Auth rejected — check OPENROUTER_API_KEY in .env, or run `npx codebuff login` to refresh the Codebuff token.';
+    return 'Auth rejected — the OPENROUTER_API_KEY in .env was rejected. Get a free key at openrouter.ai/keys, put it in .env, then tap the fix button again.';
   }
   if (s.includes('aborted') || s.includes('timeout')) return 'Agent timed out after ' + Math.round(TIMEOUT_MS / 60000) + ' min — task abandoned, server unharmed.';
   return s.slice(0, 240);
@@ -151,7 +166,7 @@ async function chatOnce(model, messages) {
   try {
     const res = await fetch(OR_BASE + '/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + OR_KEY },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + orKey() },
       body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto' }),
       signal: ac.signal,
     });
@@ -217,7 +232,7 @@ async function runOpenRouter(task, { onUpdate }) {
 // ══ Brain 2: Codebuff SDK (credits / fallback) ════════════════════════
 async function runCodebuff(task, { onUpdate }) {
   const { CodebuffClient } = require('@codebuff/sdk');
-  const client = new CodebuffClient({ apiKey: CB_TOKEN, cwd: REPO_ROOT });
+  const client = new CodebuffClient({ apiKey: cbToken(), cwd: REPO_ROOT });
   const agent = {
     id: 'secondshift-relay',
     model: process.env.AGENT_MODEL || 'glm-5.3-flash-2026-09-05',
@@ -245,10 +260,10 @@ async function runCodebuff(task, { onUpdate }) {
  * Resolves { ok, text, durationMs, backend } — never throws.
  */
 async function runTask(taskText, { onUpdate = () => {} } = {}) {
-  if (!enabled) return { ok: false, backend: null, text: 'Agent runner not activated — set OPENROUTER_API_KEY (free) in .env, or run `npx codebuff login`.', durationMs: 0 };
+  if (!isEnabled()) return { ok: false, backend: null, text: 'Agent runner not activated — add OPENROUTER_API_KEY (free from openrouter.ai/keys) to .env, then tap the fix button again.', durationMs: 0 };
   if (state.running) return { ok: false, backend: null, text: '⏳ Another agent task is still running ("' + state.lastTask + '") — /agentstatus to check.', durationMs: 0 };
 
-  const backend = BACKEND === 'codebuff' || BACKEND === 'openrouter' ? BACKEND : (OR_KEY ? 'openrouter' : 'codebuff');
+  const backend = BACKEND === 'codebuff' || BACKEND === 'openrouter' ? BACKEND : (orKey() ? 'openrouter' : 'codebuff');
   state.running = true;
   state.startedAt = new Date().toISOString();
   state.lastTask = String(taskText).slice(0, 200);
@@ -279,10 +294,11 @@ async function runTask(taskText, { onUpdate = () => {} } = {}) {
 }
 
 function status() {
-  return { enabled, backend: BACKEND || (OR_KEY ? 'openrouter' : 'codebuff'), models: FREE_MODELS,
+  return { enabled: isEnabled(), backend: BACKEND || (orKey() ? 'openrouter' : 'codebuff'), models: FREE_MODELS,
     running: state.running, startedAt: state.startedAt, lastTask: state.lastTask,
     lastFinishedAt: state.lastFinishedAt, lastOk: state.lastOk,
     lastDurationMs: state.lastDurationMs, lastError: state.lastError, runs: state.runs, failed: state.failed };
 }
 
-module.exports = { enabled, runTask, status, AGENT_MODEL: process.env.AGENT_MODEL || 'glm-5.3-flash-2026-09-05', TIMEOUT_MS, FREE_MODELS };
+module.exports = { runTask, status, AGENT_MODEL: process.env.AGENT_MODEL || 'glm-5.3-flash-2026-09-05', TIMEOUT_MS, FREE_MODELS };
+Object.defineProperty(module.exports, 'enabled', { get: isEnabled, enumerable: true }); // live — never a stale snapshot
