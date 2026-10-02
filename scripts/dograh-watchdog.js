@@ -29,11 +29,12 @@ const MODE = (process.env.DOGRAH_TUNNEL_MODE || 'quick').toLowerCase();
 const FILE = path.join(ROOT, 'public', 'dograh-endpoints.json');
 const ENVFILE = path.join(ROOT, '.env');
 // The scheduler runs us without dotenv — read our own knobs from .env when
-// not set in the environment (DOGRAH_TUNNEL_MODE, DOGRAH_PERM_API/UI).
+// not set in the environment (DOGRAH_TUNNEL_MODE, DOGRAH_PERM_API/UI,
+// WATCHDOG_TELEGRAM_* heal-alert creds).
 // Must run BEFORE the constants below are computed.
 try {
   for (const line of fs.readFileSync(ENVFILE, 'utf8').split('\n')) {
-    const m = line.match(/^\s*(DOGRAH_[A-Z_]+)\s*=\s*(.*)\s*$/);
+    const m = line.match(/^\s*((?:DOGRAH_|WATCHDOG_TELEGRAM_)[A-Z_]+)\s*=\s*(.*)\s*$/);
     if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^"|"$/g, '');
   }
 } catch (_) { /* .env optional */ }
@@ -73,6 +74,50 @@ function sh(cmd, opts = {}) {
 }
 const log = (m) => console.log(`[dograh-watchdog ${new Date().toISOString()}] ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── Telegram heal alerts — your phone knows what this PC fixed ────────
+// The bot itself lives on Render (it owns getUpdates long-polling), so the
+// watchdog only SENDS one-shot messages and never polls — it can never fight
+// the Render bot for updates. Credentials live in PC .env as
+// WATCHDOG_TELEGRAM_BOT_TOKEN / WATCHDOG_TELEGRAM_CHAT_ID (distinct names on
+// purpose: plain TELEGRAM_* in the PC .env would make server.js start a
+// second poller that steals updates from Render).
+const TG_TOKEN = process.env.WATCHDOG_TELEGRAM_BOT_TOKEN || '';
+const TG_CHAT = process.env.WATCHDOG_TELEGRAM_CHAT_ID || '';
+const ALERTS_STATE = path.join(ROOT, 'watchdog.alerts.json');
+function readAlertState() { try { return JSON.parse(fs.readFileSync(ALERTS_STATE, 'utf8')); } catch (_) { return {}; } }
+async function tgNotify(text) {
+  if (!TG_TOKEN || !TG_CHAT) {
+    log(`telegram heal alerts not configured (add WATCHDOG_TELEGRAM_BOT_TOKEN + WATCHDOG_TELEGRAM_CHAT_ID to .env) — would have sent: ${text.split('\n')[0]}`);
+    return false;
+  }
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: TG_CHAT, text }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j && j.ok) { log('telegram alert delivered'); return true; }
+    log(`telegram alert failed: HTTP ${r.status} ${j && j.description ? j.description : ''}`);
+  } catch (e) { log(`telegram alert failed: ${e.message}`); }
+  return false;
+}
+// Cooldown per alert kind so a flapping tunnel can't flood the chat: heals at
+// most every 10 min, still-down warnings at most every 30 min.
+const ALERT_COOLDOWN_MS = { heal: 10 * 60 * 1000, down: 30 * 60 * 1000 };
+async function alertOnce(kind, text) {
+  const st = readAlertState();
+  const last = st[kind + 'AlertAt'] || 0;
+  if (Date.now() - last < ALERT_COOLDOWN_MS[kind]) {
+    log(`${kind} alert suppressed (cooldown, ${Math.max(0, Math.round((ALERT_COOLDOWN_MS[kind] - (Date.now() - last)) / 60000))}m left)`);
+    return;
+  }
+  if (await tgNotify(text)) {
+    st[kind + 'AlertAt'] = Date.now();
+    try { fs.writeFileSync(ALERTS_STATE, JSON.stringify(st)); } catch (_) {}
+  }
+}
 // WATCHDOG_SLEEP_MS scales all fixed waits (tests set it tiny).
 const SLEEP = Number(process.env.WATCHDOG_SLEEP_MS) || 1000;
 const HEALTH_WAIT = Number(process.env.WATCHDOG_HEALTH_WAIT_MS) || 180000;
@@ -108,6 +153,7 @@ async function adoptNewerIfRotated(ep) {
   const loggedUi = (await tunnelUrl(UI_TUNNEL, '--since 30m')) || ep.uiUrl;
   log(`self-rotated quick tunnel detected (${ep.apiUrl} → ${loggedApi}) — adopting newest logged URLs`);
   await adoptUrls(loggedApi, loggedUi);
+  await alertOnce('heal', `🔄 Dograh self-healed — the quick tunnel rotated its URL on its own; I adopted the newest one and the site is already serving it. Nothing to do.\napi: ${loggedApi}`);
   return true;
 }
 
@@ -170,7 +216,7 @@ async function adoptUrls(api, ui) {
   }
 }
 
-async function recycle() {
+async function recycle(reason) {
   log(`tunnel DEAD — recreating ${API_TUNNEL} + ${UI_TUNNEL} (fresh registrations)`);
   try { await recreateTunnels(); } catch (e) { log(`recreate failed: ${e.message}`); }
   // quick tunnels print their hostname a few seconds after boot
@@ -184,7 +230,11 @@ async function recycle() {
     api = await tunnelUrl(API_TUNNEL, '--since 2m');
     ui = await tunnelUrl(UI_TUNNEL, '--since 2m');
   }
-  if (!api || !ui) { log('ERROR: no new tunnel URLs in logs — giving up this run'); process.exit(1); }
+  if (!api || !ui) {
+    await alertOnce('down', `⚠️ Dograh free line is STILL DOWN — I could not get new tunnel URLs this run. I retry automatically every 5 minutes; visitors can still use the pro line.${reason ? '\n(' + reason + ')' : ''}`);
+    log('ERROR: no new tunnel URLs in logs — giving up this run');
+    process.exit(1);
+  }
 
   // Edge propagation for a brand-new quick URL can take a couple of minutes
   // (530s until then). Wait — bounded — so we never commit URLs we never saw
@@ -196,6 +246,7 @@ async function recycle() {
   if (!ok) log('WARNING: new tunnels not answering yet — committing anyway; grace logic protects the next runs');
 
   await adoptUrls(api, ui);
+  await alertOnce('heal', `🛠 Dograh self-healed — ${reason || 'the free line was unreachable'}. Tunnels recreated, new URLs adopted, and the site updates itself automatically. Nothing to do.\napi: ${api}`);
 }
 
 async function main() {
@@ -223,6 +274,7 @@ async function main() {
     } catch (e) {
       log(`git push failed: ${String(e.message).slice(0, 200)} (file updated locally)`);
     }
+    await tgNotify(`🎉 Dograh is PERMANENT — ${PERM_API} answered and is now the official free-line URL. Quick tunnels retired; no more URL rotation, ever. (One-time cutover alert.)`);
     log('done');
     return;
   }
@@ -238,20 +290,20 @@ async function main() {
       // URL answers but cloudflared keeps retrying a dead registration —
       // this is the 21-hour crash-loop state; recycle before it rots.
       log('tunnel answers but cloudflared is in limbo (Tunnel not found) — recycling proactively');
-      await recycle();
+      await recycle('the tunnel answered but cloudflared was crash-looping on a dead registration (limbo) — recycled proactively');
     } else {
       log(`tunnel healthy: ${ep.apiUrl}`);
     }
   } else if (await adoptNewerIfRotated(ep)) {
     // quick-tunnel re-registered itself under a NEW url (observed on this
     // NAT) — adopt the newest logged URLs instead of recycling containers
-    // that are perfectly alive.
+    // that are perfectly alive (heal alert fires inside).
   } else if (await freshRegistration()) {
     // dead URL but cloudflared just (re)registered — the 530 is propagation,
     // not a dead tunnel; recycling here would churn URLs every 5 minutes.
     log('tunnel dead but a fresh edge registration exists — URL propagation; waiting for next cycle');
   } else {
-    await recycle();
+    await recycle('the free line was unreachable');
   }
   log('done');
 }

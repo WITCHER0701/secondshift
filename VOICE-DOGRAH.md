@@ -93,6 +93,32 @@ Run it manually any time:
 cd "/d/my LLM/.n8n-files/website/secondshift" && node scripts/dograh-watchdog.js
 ```
 
+### Telegram heal alerts (your phone knows what the PC fixed)
+
+The watchdog sends you a Telegram message whenever it repairs the free line:
+
+- **🔄 self-healed (rotation)** — the quick tunnel re-registered under a new
+  URL on its own; the watchdog adopted it and the site is already serving it.
+- **🛠 self-healed (recreated)** — the tunnel was dead; containers were
+  recreated, new URLs adopted, push done.
+- **⚠️ still down** — a run could not get new URLs; retries continue every
+  5 min automatically.
+- **🎉 permanent cutover** — one-time: the watchdog switches the endpoints to
+  `voice.secondshift.space` the moment your Cloudflare nameservers go live.
+
+Setup (PC `.env`, picked up on the watchdog's next 5-min run — no restart
+needed; the scheduler never has the values cached):
+
+```ini
+WATCHDOG_TELEGRAM_BOT_TOKEN=<same token as the Render bot>
+WATCHDOG_TELEGRAM_CHAT_ID=<your chat id>
+```
+
+The same token is safe: the watchdog only **sends** one-shot messages and
+never polls, so it can't fight the Render bot for updates. Anti-spam: heals
+cooldown 10 min, still-down warnings 30 min (`watchdog.alerts.json`). Without
+creds the watchdog logs `telegram heal alerts not configured` and carries on.
+
 ## Never unreachable — the five layers
 
 1. **Self-heal (automatic, ≤5 min):** the scheduler task runs the watchdog

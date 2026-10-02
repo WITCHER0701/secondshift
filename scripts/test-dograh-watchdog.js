@@ -45,10 +45,19 @@ function writeScenarioState() {
   fs.writeFileSync(path.join(SHIM_DIR, 'state.json'), JSON.stringify(scenarioState));
 }
 // fetch preload for the CHILD watchdog process: makes only the scenario's
-// "healthy" URLs answer (the parent's global.fetch patch can't reach it).
+// "healthy" URLs answer; records every Telegram send to tg-sends.json so
+// scenarios can assert on heal alerts (the parent's global.fetch patch can't
+// reach the child).
 fs.writeFileSync(path.join(SHIM_DIR, 'fetch-preload.js'), `const fs = require('fs');
 const st = JSON.parse(fs.readFileSync(process.env.SHIM_DATA + '/state.json', 'utf8'));
-global.fetch = async (url) => {
+global.fetch = async (url, opts) => {
+  if (String(url).includes('api.telegram.org')) {
+    const body = JSON.parse((opts && opts.body) || '{}');
+    const sends = JSON.parse(fs.readFileSync(process.env.SHIM_DATA + '/tg-sends.json', 'utf8') || '[]');
+    sends.push(body.text || '');
+    fs.writeFileSync(process.env.SHIM_DATA + '/tg-sends.json', JSON.stringify(sends));
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  }
   if ((st.healthy || []).some((u) => String(url).startsWith(u))) return { ok: true, status: 200 };
   throw new Error('connect ECONNREFUSED (fake)');
 };
@@ -81,8 +90,10 @@ function regLogs(api, ui) {
 }
 
 /** Runs the watchdog as a child process; resolves with its stdout lines. */
-function runScenario(env = {}) {
+function runScenario(env = {}, opts = {}) {
   writeScenarioState();
+  fs.writeFileSync(path.join(SHIM_DIR, 'tg-sends.json'), '[]');
+  if (!opts.keepAlertState) { try { fs.unlinkSync(path.join(sandbox, 'watchdog.alerts.json')); } catch (_) {} }
   return new Promise((resolve, reject) => {
     execFile(process.execPath, ['-r', path.join(SHIM_DIR, 'fetch-preload.js'), WD], {
       cwd: sandbox,
@@ -95,6 +106,8 @@ function runScenario(env = {}) {
         PATH: SHIM_DIR + path.delimiter + process.env.PATH,
         SHIM_DATA: SHIM_DIR,
         DOGRAH_TUNNEL_MODE: 'quick',
+        WATCHDOG_TELEGRAM_BOT_TOKEN: 'TEST:TOKEN',
+        WATCHDOG_TELEGRAM_CHAT_ID: '424242',
         ...env,
       },
     }, (err, stdout, stderr) => {
@@ -105,6 +118,7 @@ function runScenario(env = {}) {
 }
 // counters live on disk (the child increments them) — always read fresh
 const readState = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'state.json'), 'utf8'));
+const readSends = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'tg-sends.json'), 'utf8'));
 
 (async () => {
   // ── 1 — healthy tunnel, no limbo → pure no-op ────────────────────────
@@ -171,6 +185,44 @@ const readState = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'state.js
   t(ep6.apiUrl === PERM_API && ep6.uiUrl === PERM_UI, 'transition: endpoints flipped to permanent URLs', JSON.stringify(ep6));
   t(fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_TUNNEL_MODE=named') && fs.readFileSync(ENVF, 'utf8').includes('DOGRAH_API_URL=' + PERM_API), 'transition: .env gets perm URLs + named mode');
   t(readState().retires >= 1, 'transition: quick-tunnel containers retired', 'retires=' + readState().retires);
+  t(readSends().some((s) => /PERMANENT/.test(s)), 'transition: one-time cutover telegram sent', JSON.stringify(readSends()).slice(0, 120));
+
+  // ── 7 — healthy tunnel → NO telegram noise ──────────────────────────
+  scenarioState.healthy = [GOOD_API];
+  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: GOOD_API, updatedAt: 'old' }); // undo scenario 6's perm flip
+  scenarioState.apiLogs = banner(GOOD_API); // limbo gone
+  scenarioState.uiLogs = banner(GOOD_UI);
+  scenarioState.recycles = 0;
+  r = await runScenario();
+  t(readSends().length === 0, 'healthy → zero telegram sends', JSON.stringify(readSends()).slice(0, 120));
+
+  // ── 8 — real heal (dead → recreated) → heal alert delivered ─────────
+  scenarioState.healthy = []; // nothing answers → recycle path
+  scenarioState.recycles = 0;
+  // after recreate, fake docker logs expose GOOD urls; health flips via state
+  scenarioState.apiLogs = banner(null);
+  scenarioState.uiLogs = banner(null);
+  r = await runScenario();
+  t(readSends().some((s) => /STILL DOWN/.test(s)), 'unrecoverable run → still-down alert sent', JSON.stringify(readSends()).slice(0, 140));
+
+  // ── 9 — cooldown: immediate second failure is suppressed ───────────
+  r = await runScenario({}, { keepAlertState: true });
+  t(readSends().length === 0, 'second failure within cooldown → alert suppressed', JSON.stringify(readSends()));
+  t(r.lines.join(' ').includes('suppressed'), 'suppression is logged', r.lines.filter((l) => l.includes('suppress')).join(' | ').slice(0, 140));
+
+  // ── 10 — self-rotation heal → heal alert ────────────────────────────
+  scenarioState.healthy = [GOOD_API];
+  writeEp({ token: 'emb_x', uiUrl: 'https://stale2.trycloudflare.com', apiUrl: 'https://stale2-api.trycloudflare.com', updatedAt: 'old' });
+  regLogs(GOOD_API, GOOD_UI);
+  scenarioState.recycles = 0;
+  r = await runScenario();
+  t(readSends().some((s) => /self-healed/.test(s) && /rotated/.test(s)), 'self-rotated → heal alert sent', JSON.stringify(readSends()).slice(0, 140));
+
+  // ── 11 — no creds → warns in logs, never crashes, no alert ─────────
+  scenarioState.healthy = [GOOD_API];
+  regLogs(GOOD_API, GOOD_UI);
+  r = await runScenario({ WATCHDOG_TELEGRAM_BOT_TOKEN: '', WATCHDOG_TELEGRAM_CHAT_ID: '' });
+  t(r.lines.join(' ').includes('heal alerts not configured') || readSends().length === 0, 'missing creds → clean log note, no crash');
 
   realLog(ok ? '\nALL PASS' : '\nFAILURES PRESENT');
   process.exit(ok ? 0 : 1);

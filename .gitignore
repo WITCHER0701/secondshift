@@ -5,3 +5,4 @@ data/
 .env
 admin-inline-check.js
 watchdog.heartbeat
+watchdog.alerts.json
