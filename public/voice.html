@@ -724,7 +724,7 @@
   $('dograhStart').addEventListener('click', async () => {
       if (dograhActive) return; // already live — one call at a time
       if (vapiActive) { addLine('agent', '⚠️ Hang up the pro line first — one line at a time.'); return; }
-      // fresh config at click time — always the newest tunnel URLs
+      // fresh config at click time — always the newest endpoints
       let cfg = null;
       try { cfg = await fetch('/api/dograh/config').then(r => r.json()); } catch (e) {}
       if (!cfg || !cfg.configured) {

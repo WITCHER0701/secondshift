@@ -1,8 +1,8 @@
 /**
- * SecondShift — natural voice engine (Kokoro-82M, in-browser, free).
+ * SecondShift — natural voice engine (in-browser neural voice, free).
  *
  * Why not speechSynthesis? The default browser voices (Windows SAPI
- * David/Zira…) sound robotic and cheap. Kokoro-82M is an open-source
+ * David/Zira…) sound robotic and cheap. This model is an open-source
  * (Apache-2.0) neural TTS that runs 100% in the browser — no server,
  * no API key, still $0/mo — and sounds genuinely human.
  *
@@ -125,7 +125,7 @@
     } catch (e) { state.speaking = false; notify(); onend && onend(); }
   }
 
-  // ── kokoro worker pipeline ───────────────────────────────────────────
+  // ── neural worker pipeline ───────────────────────────────────────────
   let worker = null;
   let reqId = 0;
   const pending = new Map(); // id -> resolve(blob | reject)
@@ -142,7 +142,7 @@
         if (id != null && pending.has(id)) { pending.get(id).reject(new Error(message)); pending.delete(id); }
         else { // init-level failure → permanent system fallback
           state.failed = true; state.loading = false; notify();
-          console.warn('[voice] Kokoro unavailable, using system voice:', message);
+          console.warn('[voice] natural voice unavailable — using the browser voice:', message);
         }
       }
     };
@@ -199,7 +199,7 @@
         await playAudio(audio);
       }
     } catch (e) {
-      console.warn('[voice] kokoro generation failed, falling back:', e && e.message);
+      console.warn('[voice] natural voice generation failed — falling back:', e && e.message);
       if (myToken === utterance) speakSystem(text);
     } finally {
       if (myToken === utterance) { state.speaking = false; notify(); }

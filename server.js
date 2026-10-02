@@ -107,6 +107,9 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ab, bb);
 }
 
+// Don't advertise the framework in every response header (visitors see
+// "x-powered-by: Express" otherwise) — no reason to fingerprint our stack.
+app.disable('x-powered-by');
 // behind Render's proxy, req.ip/protocol come from X-Forwarded-* headers
 app.set('trust proxy', 1);
 app.use(express.json());
@@ -162,6 +165,11 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
   next();
 });
+// Internal plumbing is not a visitor asset. The tunnel-endpoints file is read
+// from disk by /api/dograh/config and committed for the watchdog — the browser
+// never fetches it, so don't serve it (it carries tunnel URLs + the embed token).
+app.use('/dograh-endpoints.json', (req, res) => res.status(404).end());
+
 // HTML must always revalidate (etag → 304 when unchanged, fresh when edited);
 // hashed/static assets can cache. Prevents visitors getting stale pages.
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -456,7 +464,9 @@ app.post('/admin/api/cloud/pull', requireAdmin, async (req, res) => {
 
 // ── health check (Render + uptime monitors) ─────────────────────────
 app.get('/healthz', (req, res) => {
-  res.json({ ok: true, service: 'secondshift', time: new Date().toISOString(), monitor: tmon.enabled ? 'telegram' : 'local-only' });
+  // Bare-minimum payload: this endpoint is public, so it says "up" and nothing
+  // about our tooling ("on"/"off" instead of naming the alerting channel).
+  res.json({ ok: true, service: 'secondshift', time: new Date().toISOString(), monitor: tmon.enabled ? 'on' : 'off' });
 });
 
 // ── boot ──────────────────────────────────────────────────────────────

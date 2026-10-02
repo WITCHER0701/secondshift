@@ -1,6 +1,6 @@
 /*
- * SecondShift — Kokoro TTS Web Worker.
- * Loads the Kokoro-82M neural model (Apache-2.0, ~86MB q8) off the main
+ * SecondShift — neural voice Web Worker.
+ * Loads the in-browser neural voice model (Apache-2.0, ~86MB q8) off the main
  * thread so generating speech never blocks or freezes the page. Each
  * request returns a WAV Blob; the main thread just plays them in order.
  *

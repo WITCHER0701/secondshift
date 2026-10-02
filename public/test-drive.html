@@ -214,7 +214,7 @@
     $('contentFields').classList.toggle('hidden', slug !== 'content-engine');
     $('leadFields').classList.toggle('hidden', slug !== 'lead-responder');
     $('runHint').textContent = {
-      'review-automation': 'The pipeline fires on the right, step by step — POS webhook, Claude message, SMS, then the interactive rating gate.',
+      'review-automation': 'The pipeline fires on the right, step by step — sale closed, AI message, SMS, then the interactive rating gate.',
       'voice-agent': 'A live call starts on the right. Type — or tap the mic and speak. This is the real booking engine, not a recording.',
       'content-engine': 'Fill the brief (or keep ours) and the Content Crew generates a real 7-post week: captions, hashtags, schedule.',
       'lead-responder': 'Paste a lead — or keep ours. First Response replies instantly, qualifies, scores, and writes the owner brief.',
@@ -303,8 +303,8 @@
   }
 
   const reviewScript = [
-    { delay: 300,  act: () => { setStep(0, 'active'); $('screenSub').textContent = 'invoice #12345 closed'; addBubble('🧾 <b>POS webhook received:</b> Invoice #12345 · Sarah Johnson · $278.00'); } },
-    { delay: 1300, act: () => { setStep(0, 'done'); setStep(1, 'active'); $('screenSub').textContent = 'Claude is writing…'; addBubble('🤖 <b>Claude personalizing the message</b> — name, service, staff, tone…'); } },
+    { delay: 300,  act: () => { setStep(0, 'active'); $('screenSub').textContent = 'invoice #12345 closed'; addBubble('🧾 <b>New sale —</b> Invoice #12345 · Sarah Johnson · $278.00'); } },
+    { delay: 1300, act: () => { setStep(0, 'done'); setStep(1, 'active'); $('screenSub').textContent = 'Writing your message…'; addBubble('🤖 <b>AI personalizing the message</b> — name, service, staff, tone…'); } },
     { delay: 2600, act: () => { setStep(1, 'done'); setStep(2, 'active'); addBubble(`Hi Sarah! 👋 Thanks for choosing us today — we loved having you! If you have a minute, would you leave us a quick Google review? It helps other customers find us.<br><span class="lnk" id="tdReviewLink">tap here to review ⭐</span><br><br>Thanks again!<br>— The Team`); $('screenSub').textContent = 'SMS delivered · 2.1s'; fetch('/api/testdrive', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'testdrive_step', slug: current.slug, step: 'sms_sent' }) }); } },
     { delay: 3400, act: () => { setStep(2, 'done'); setStep(3, 'active'); addGate(); } },
   ];
