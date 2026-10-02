@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  // ── voices (real Kokoro voice packs) ─────────────────────────────────
+  // ── voices (voice packs for the in-browser demo) ────────────────────
   const VOICES = {
     af_heart:   { label: 'Heart · warm female (US)',      gender: 'f' },
     af_bella:   { label: 'Bella · expressive female (US)', gender: 'f' },
@@ -30,14 +30,17 @@
   };
   const DEFAULT_VOICE = 'af_heart';
 
+  const savedVoice = localStorage.getItem('ss_voice_kokoro');
   const state = {
     ready: false,
     loading: false,
     failed: false,
     progress: 0,          // 0..1 model download
     speaking: false,
-    mode: localStorage.getItem('ss_voice_mode') || 'kokoro',   // 'kokoro' | 'system'
-    voice: localStorage.getItem('ss_voice_kokoro') || DEFAULT_VOICE,
+    // OPT-IN: the default is the browser voice, so nothing heavy downloads
+    // just because someone opened the page (they switch it on explicitly)
+    mode: localStorage.getItem('ss_voice_mode') || 'system',   // 'kokoro' | 'system'
+    voice: VOICES[savedVoice] ? savedVoice : DEFAULT_VOICE,    // ignore a stale saved voice
     rate: parseFloat(localStorage.getItem('ss_voice_rate') || '1.0'),
   };
 
@@ -212,8 +215,10 @@
 
   // ── settings API for UI ──────────────────────────────────────────────
   function setMode(m) { state.mode = m; localStorage.setItem('ss_voice_mode', m); notify(); }
-  function setVoice(v) { state.voice = v; localStorage.setItem('ss_voice_kokoro', v); }
+  function setVoice(v) { if (VOICES[v]) { state.voice = v; localStorage.setItem('ss_voice_kokoro', v); } }
   function setRate(r) { state.rate = Math.min(1.3, Math.max(0.8, +r || 1)); localStorage.setItem('ss_voice_rate', state.rate); }
+  // preload the neural model on demand — only when the visitor opts in
+  function warm() { try { ensureWorker(); } catch (_) {} }
 
-  window.SecondShiftVoice = { speak, stop: stopSpeaking, onChange, setMode, setVoice, setRate, VOICES, state };
+  window.SecondShiftVoice = { speak, stop: stopSpeaking, onChange, setMode, setVoice, setRate, warm, VOICES, state };
 })();

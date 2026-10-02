@@ -132,9 +132,9 @@
         <div class="endnote" id="endNote">🎉 <b>Booked!</b> This appointment is now in the owner dashboard — that's exactly what your customers will experience.</div>
         <div class="voice-box">
           <div class="vb-row" style="justify-content:space-between">
-            <span class="vb-title"><span id="vbDot" class="vb-dot"></span> <span id="vbLabel">Voice: loading…</span></span>
-            <label style="display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--text-2);cursor:pointer">
-              <input type="checkbox" id="vbNatural" checked style="accent-color:#2997ff"> Natural voice
+            <span class="vb-title"><span id="vbDot" class="vb-dot"></span> <span id="vbLabel">Voice: browser voice</span></span>
+            <label style="display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--text-2);cursor:pointer" title="Loads a small neural voice into this page once. Off by default so nothing heavy downloads on its own.">
+              <input type="checkbox" id="vbNatural" style="accent-color:#2997ff"> Natural voice
             </label>
           </div>
           <div id="vbProgress" class="vb-progress hidden"><div class="vb-bar" id="vbBar"></div></div>
@@ -222,21 +222,26 @@
   }
   voiceSel.value = TTS.state.voice;
   voiceSel.addEventListener('change', () => TTS.setVoice(voiceSel.value));
+
+  // natural voice is opt-in: the model downloads only when this is switched on
   $('vbNatural').checked = TTS.state.mode === 'kokoro';
-  $('vbNatural').addEventListener('change', (e) => TTS.setMode(e.target.checked ? 'kokoro' : 'system'));
+  $('vbNatural').addEventListener('change', (e) => {
+    TTS.setMode(e.target.checked ? 'kokoro' : 'system');
+    if (e.target.checked) TTS.warm();
+  });
   $('vbRate').value = TTS.state.rate;
   $('vbRateVal').textContent = TTS.state.rate + '×';
   $('vbRate').addEventListener('input', (e) => { TTS.setRate(e.target.value); $('vbRateVal').textContent = (+e.target.value).toFixed(2).replace(/0$/, '') + '×'; });
   $('vbPreview').addEventListener('click', () => { TTS.stop(); TTS.speak('Hi, this is your receptionist. I never take a day off.'); });
   TTS.onChange((s) => {
     const dot = $('vbDot'), label = $('vbLabel'), prog = $('vbProgress'), bar = $('vbBar');
-    if (s.failed || s.mode === 'system') { dot.className = 'vb-dot sys'; label.textContent = 'Voice: system'; }
+    if (s.failed || s.mode === 'system') { dot.className = 'vb-dot sys'; label.textContent = 'Voice: browser voice'; }
     else if (s.ready) { dot.className = 'vb-dot kokoro'; label.textContent = 'Voice: natural neural · ready'; prog.classList.add('hidden'); }
     else if (s.loading) {
       dot.className = 'vb-dot loading';
-      label.textContent = 'Downloading neural voice · ' + Math.round((s.progress || 0) * 100) + '%';
+      label.textContent = 'Loading natural voice · ' + Math.round((s.progress || 0) * 100) + '%';
       prog.classList.remove('hidden'); bar.style.width = Math.round((s.progress || 0) * 100) + '%';
-    } else { dot.className = 'vb-dot'; label.textContent = 'Voice: system (natural voice ready to enable)'; }
+    } else { dot.className = 'vb-dot'; label.textContent = 'Voice: natural voice (switched on — click ▶)'; }
   });
 
   function addLine(role, text) {

@@ -66,6 +66,44 @@ Test locally: open http://localhost:4000/voice.html → green **Talk on the
 free line** button. From the phone on the same Wi-Fi:
 `http://192.168.1.76:4000/voice.html`.
 
+## Indian + international callers (the free line)
+
+The agent you demo is tuned for **both markets** — Indian accents and
+international English — with one tool: `scripts/dograh-tune.js`.
+
+```bash
+node scripts/dograh-tune.js show                            # what the agent is set to now
+node scripts/dograh-tune.js language india --apply          # en-IN — Indian English
+node scripts/dograh-tune.js language international --apply  # en — accent-agnostic English
+node scripts/dograh-tune.js language multilingual --apply   # multi — auto-detect (en + hi + 8)
+node scripts/dograh-tune.js prompts --apply                 # India + international behaviour
+node scripts/dograh-tune.js restore                         # undo the last change
+```
+
+- **Speech recognition (accent):** the STT language is the knob that decides how
+  well an accent is *heard*. `en-IN` is Deepgram's Indian-English model — the best
+  match for Indian accents and Hinglish. `en` is accent-agnostic English for
+  international callers. `multi` auto-detects only **de, en, es, fr, hi, it, ja,
+  nl, pt, ru** (it is not the full 81-language list offered for explicit picks).
+- **Behaviour prompts:** `prompts --apply` appends an `## ACCENT & MARKET HANDLING`
+  section to the global prompt: mirror the caller's language (English / Hindi /
+  Hinglish), treat Indian-English phrasing (“kindly”, “day after tomorrow”,
+  “4 o'clock”) as normal speech, read back 10-digit / +91 numbers, understand
+  lakh/crore, and keep a neutral English tone for callers from outside India.
+  It is idempotent — re-running never stacks sections.
+- **Voice:** stays on Dograh's managed `default`. Managed mode allows a custom
+  voice id (Settings → voice), so an Indian-English voice id can be dropped in
+  later if you find one you like.
+- **Safety:** every write is backed up first to `dograh-tune.backup.json`
+  (gitignored), the run is a dry-run unless you pass `--apply`, and the API
+  container is restarted afterwards so the agent reloads (a few seconds).
+  The tuner edits only two rows: `organization_configurations`
+  (`MODEL_CONFIGURATION_V2`) and `workflow_definitions` (`workflow_json`);
+  `restore` puts both back.
+
+**Demo cheat sheet:** Indian client → `language india` · international client →
+`language international` · mixed or unknown → `language multilingual`.
+
 ## Tunnel URLs self-heal — the watchdog
 
 The public URLs are trycloudflare **quick tunnels** (ephemeral): they rotate
