@@ -301,6 +301,7 @@ const HELP_TEXT =
   '/fix — run a fix by name\n' +
   '/agent <task> — my Codebuff agent does it on the PC and reports back\n' +
   '/agentstatus — what the agent is doing right now\n' +
+  '/envcheck — which env vars THIS server has, and which are missing\n' +
   '/help — this menu\n' +
   'Alerts: I message you automatically on crashes, 5xx spikes, and watchdog drift — with a Fix button when a safe remedy exists.';
 
@@ -319,6 +320,57 @@ function formatStatus(s) {
     'Voice: ' + (s.calls || 0) + ' ' + ((s.calls || 0) === 1 ? 'call' : 'calls') + ' · ' + (s.appointments || 0) + ' ' + ((s.appointments || 0) === 1 ? 'appointment' : 'appointments'),
     'Content sets: ' + (s.contents || 0) + ' · Events logged: ' + (s.events || 0),
   ].join('\n');
+}
+
+// ── /envcheck: what this server is configured with ────────────────────
+// Answers the question "why does this work on one server and not the other?"
+// from a phone. Values are NEVER printed — only set / missing — so the reply
+// is safe to keep in chat history.
+const ENV_CHECK_SECTIONS = [
+  { group: 'Bot + site', vars: [
+    { key: 'TELEGRAM_BOT_TOKEN', note: 'the bot can only reply on a server that has this' },
+    { key: 'TELEGRAM_CHAT_ID', note: 'owner-only gate for every command' },
+    { key: 'ADMIN_PASSWORD', warn: true, note: 'unset → the public default protects nothing' },
+    { key: 'SESSION_SECRET', warn: true, note: 'unset → a shared default signs sessions' },
+  ] },
+  { group: 'Agent relay', vars: [
+    { key: 'OPENROUTER_API_KEY', note: '/agent and the test-agent fix need it on THIS server' },
+  ] },
+  { group: 'Pro line', vars: [
+    { key: 'VAPI_PUBLIC_KEY', note: 'the pro line stays hidden without it' },
+    { key: 'VAPI_ASSISTANT_ID', note: 'the pro line stays hidden without it' },
+  ] },
+];
+
+function formatEnvCheck(env = process.env, extra = {}) {
+  const has = (k) => !!(env && env[k] && String(env[k]).trim());
+  const where = env && env.RENDER ? 'Render' : 'this PC';
+  const sha = env && env.RENDER_GIT_COMMIT ? String(env.RENDER_GIT_COMMIT).slice(0, 7) : '';
+  const out = ['🔎 Env check — ' + where + (sha ? ' · commit ' + sha : ''), ''];
+  let missing = 0, warnings = 0;
+  for (const section of ENV_CHECK_SECTIONS) {
+    out.push(section.group);
+    for (const v of section.vars) {
+      if (has(v.key)) out.push('✅ ' + v.key);
+      else if (v.warn) { warnings++; out.push('⚠️ ' + v.key + ' — ' + v.note); }
+      else { missing++; out.push('❌ ' + v.key + ' — ' + v.note); }
+    }
+    out.push('');
+  }
+  // data backup: either provider is fine, so it gets its own line
+  const gist = has('CLOUD_GIST_TOKEN') && has('CLOUD_GIST_ID');
+  const firebase = has('FIREBASE_DB_URL') && has('FIREBASE_DB_SECRET');
+  if (!gist && !firebase) warnings++;
+  out.push('Data');
+  out.push(gist ? '✅ cloud sync — GitHub Gist' : firebase ? '✅ cloud sync — Firebase' : '⚠️ no cloud sync — data stays on this server only');
+  out.push('');
+  const a = extra.agent;
+  if (a) out.push('Agent: ' + (a.enabled ? '✅ ' + a.backend + ' · runs ' + a.runs + ' · failed ' + a.failed : '❌ inactive — no OPENROUTER_API_KEY here'));
+  out.push(missing || warnings
+    ? (missing + ' missing · ' + warnings + ' warning' + (warnings === 1 ? '' : 's') +
+       ' — set them in ' + (env && env.RENDER ? 'Render → your service → Environment → Save (redeploys)' : '.env on this PC'))
+    : '✅ everything required is present');
+  return out.join('\n');
 }
 
 function formatHealth(results) {
@@ -396,6 +448,10 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
         }
         return tgCallForm('sendMessage', { chat_id: CHAT_ID, text: lines.join('\n').slice(0, MSG_MAX), reply_markup: kb.inline_keyboard.length ? kb : undefined }).then((r) => { if (r && r.ok) { state.repliesSent++; state.lastReplyAt = new Date().toISOString(); } });
       } catch (e) { return reply('🧘 /diagnose failed: ' + String((e && e.message) || e).slice(0, 200)); }
+    }
+    if (cmd === '/envcheck') {
+      state.commands.replies['/envcheck'] = (state.commands.replies['/envcheck'] || 0) + 1;
+      return reply(formatEnvCheck(process.env, { agent: agentRunner.status() }));
     }
     if (cmd === '/fix') {
       state.commands.replies['/fix'] = (state.commands.replies['/fix'] || 0) + 1;
@@ -486,4 +542,4 @@ function status() {
   };
 }
 
-module.exports = { enabled, send, notify5xx, notifyCrash, startWatchdog, startCommands, registerFix, alertWithFix, stop, status, formatStatus, formatHealth, HELP_TEXT };
+module.exports = { enabled, send, notify5xx, notifyCrash, startWatchdog, startCommands, registerFix, alertWithFix, stop, status, formatStatus, formatHealth, formatEnvCheck, HELP_TEXT };

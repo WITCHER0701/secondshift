@@ -38,7 +38,8 @@ Restart/redeploy → the boot log says `[monitor] ✔ Telegram monitor live`. If
 
 1. Send your bot `/status` → it replies with live counts (leads, clients, MRR, calls, appointments, invoices) straight from the data store.
 2. `/health` → probes every critical route + the data file right now and reports ✅/❌ per line.
-3. `/help` → command menu.
+3. `/envcheck` → a config audit of **the server that answered**: which env vars are set and which are missing (never the values). It names the host (Render + deployed commit, or this PC) and flags dangerous defaults (`ADMIN_PASSWORD`, `SESSION_SECRET`) and a missing cloud-sync pair — so "why does this work on one server and not the other?" is answerable from your phone. Values are never printed, so the reply is safe to keep in chat history.
+4. `/help` → command menu.
 
 Automatic alerts you'll receive without doing anything:
 - 💥 **`uncaughtException` / `unhandledRejection`** — a crash just happened (deduped per error, 5-min window)
