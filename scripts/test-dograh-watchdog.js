@@ -38,7 +38,9 @@ const writeEp = (j) => fs.writeFileSync(EP, JSON.stringify(j, null, 2) + '\n');
 const SHIM_DIR = path.join(sandbox, 'shim');
 fs.mkdirSync(SHIM_DIR, { recursive: true });
 // fake `docker` and `git` executables driven by scenario JSON
-fs.writeFileSync(path.join(SHIM_DIR, 'docker.cmd'), '@echo off\r\nnode "%SHIM_DATA%\\fake-docker.js" %*\r\n');
+// %~dp0 = directory of this .cmd file (trailing backslash included) — immune to
+// env-var expansion quirks that corrupt `%SHIM_DATA%\fake-docker.js` under cmd.exe.
+fs.writeFileSync(path.join(SHIM_DIR, 'docker.cmd'), '@echo off\r\nnode "%~dp0fake-docker.js" %*\r\n');
 fs.writeFileSync(path.join(SHIM_DIR, 'git.cmd'), '@echo off\r\nexit /b 0\r\n');
 const scenarioState = { apiLogs: '', uiLogs: '', recycles: 0, retires: 0, healthy: [] };
 function writeScenarioState() {
@@ -62,12 +64,18 @@ global.fetch = async (url, opts) => {
   throw new Error('connect ECONNREFUSED (fake)');
 };
 `);
-// fake docker: serves logs + counts rm/run (written fresh each scenario)
+// fake docker: serves logs + ps/inspect/compose + counts rm/run (fresh each scenario)
 const fakeDocker = `const fs=require('fs');
 const st=JSON.parse(fs.readFileSync(process.env.SHIM_DATA+'/state.json','utf8'));
 const a=process.argv.slice(2).join(' ');
+const APP=['dograh-api-1','dograh-ui-1','dograh-postgres-1','dograh-redis-1'];
+const TUN=['dograh-ui-tunnel','cloudflared-tunnel'];
+if(!st.running) st.running = st.originDown ? TUN : TUN.concat(APP);
 if(a.startsWith('logs cloudflared-tunnel')){console.log(st.apiLogs);}
 else if(a.startsWith('logs dograh-ui-tunnel')){console.log(st.uiLogs);}
+else if(a.startsWith('ps ')){console.log(st.running.join('\\n'));}
+else if(a.startsWith('inspect -f')){console.log('healthy');}
+else if(a.startsWith('compose -f')&&a.includes(' up -d')){st.originRepaired=(st.originRepaired||0)+1;st.running=TUN.concat(APP);fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));}
 else if(a.startsWith('run -d --name cloudflared-tunnel')){st.recycles++;fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));console.log('id');}
 else if(a.startsWith('run -d --name dograh-ui-tunnel')){fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));console.log('id');}
 else if(a.startsWith('rm -f')){st.retires++;fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));}
@@ -134,7 +142,7 @@ const readSends = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'tg-sends
   scenarioState.apiLogs += '\n' + banner(null); // Tunnel not found in last 10m
   const before = fs.readFileSync(EP, 'utf8');
   r = await runScenario();
-  t(readState().recycles === 1, 'limbo → proactive recreate (fresh registrations)', 'recycles=' + readState().recycles + ' · out: ' + r.lines.join(' | ').slice(0, 200));
+  t(readState().recycles === 1, 'limbo → proactive recreate (fresh registrations)', 'recycles=' + readState().recycles + ' · out: ' + r.lines.join(' | ').slice(0, 200) + ' · ERR: ' + String(r.stderr).slice(0, 300));
   t(fs.readFileSync(EP, 'utf8') === before, 'URLs unchanged → endpoints file untouched (no-op guard)');
 
   // ── 3 — dead URL but NEWER logged URL (self-rotated) → adopt, no recycle ──
@@ -223,6 +231,27 @@ const readSends = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'tg-sends
   regLogs(GOOD_API, GOOD_UI);
   r = await runScenario({ WATCHDOG_TELEGRAM_BOT_TOKEN: '', WATCHDOG_TELEGRAM_CHAT_ID: '' });
   t(r.lines.join(' ').includes('heal alerts not configured') || readSends().length === 0, 'missing creds → clean log note, no crash');
+
+  // ── 12 — origin stack down (Docker restart) → compose up, no tunnel churn ──
+  // The app containers exited while tunnels stayed up: the watchdog must
+  // revive the ORIGIN instead of chasing phantom tunnel problems.
+  scenarioState.originDown = true;
+  scenarioState.healthy = [GOOD_API];
+  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: GOOD_API, updatedAt: 'old' });
+  regLogs(GOOD_API, GOOD_UI);
+  scenarioState.recycles = 0;
+  r = await runScenario();
+  t(readState().originRepaired >= 1, 'origin down → docker compose up runs', 'repaired=' + readState().originRepaired);
+  t(r.lines.join(' ').includes('origin stack healthy again'), 'origin heals within the run', r.lines.filter((l) => l.includes('origin')).join(' | ').slice(0, 160));
+  t(readState().recycles === 0, 'origin down → tunnels NOT recreated (origin was the problem)', 'recycles=' + readState().recycles);
+  scenarioState.originDown = false;
+
+  // ── 13 — healthy origin → zero compose calls, zero noise ─────────────
+  scenarioState.healthy = [GOOD_API];
+  regLogs(GOOD_API, GOOD_UI);
+  r = await runScenario();
+  t(!readState().originRepaired, 'healthy origin → no compose calls', 'repaired=' + readState().originRepaired);
+  t(readSends().length === 0, 'healthy origin → no telegram noise', JSON.stringify(readSends()).slice(0, 120));
 
   realLog(ok ? '\nALL PASS' : '\nFAILURES PRESENT');
   process.exit(ok ? 0 : 1);

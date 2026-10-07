@@ -277,7 +277,9 @@
     const j = await res.json();
     callId = j.callId;
     addLine('agent', j.reply);
-    speak(j.reply);
+    // greeting stays as TEXT only — a voice that starts talking the moment
+    // someone opens the page is jarring (and unwelcome in client demos).
+    // Voice replies still play once a conversation is actually underway.
     setStatus('Listening — book something!', false);
   }
 

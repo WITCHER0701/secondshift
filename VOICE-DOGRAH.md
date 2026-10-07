@@ -157,7 +157,40 @@ never polls, so it can't fight the Render bot for updates. Anti-spam: heals
 cooldown 10 min, still-down warnings 30 min (`watchdog.alerts.json`). Without
 creds the watchdog logs `telegram heal alerts not configured` and carries on.
 
-## Never unreachable — the five layers
+### The app containers heal themselves too (added 2026-10-08)
+
+The real reason the free line kept saying "warming up" was NOT the tunnels:
+after every Docker Desktop / host restart the four app containers
+(dograh-api-1, dograh-ui-1, dograh-postgres-1, dograh-redis-1) stayed
+**Exited (255)** while the tunnel containers kept running — visitors got
+errors while the watchdog chased phantom tunnel problems. Two permanent
+fixes, both verified 2026-10-08:
+
+- **Restart policies:** all 8 containers are now `--restart unless-stopped`
+  (`docker update --restart unless-stopped <name>`), so Docker itself
+  revives them on every daemon start.
+- **Watchdog origin check:** every 5-min run now STARTS with
+  `ensureOriginStack()` — `docker ps` first; if any app container is down
+  it runs `docker compose -f dograh/docker-compose.yaml up -d`, waits
+  (bounded) for the healthchecks, and only then judges the tunnels. A dead
+  origin is never again mistaken for a dead tunnel (and never churns
+  tunnel URLs because of one).
+
+## Same-origin free-line proxy (added 2026-10-08)
+
+Visitors never see a tunnel hostname any more. `server.js` proxies
+`/free/ui/*` + `/free/api/*` — HTTP **and** websocket upgrades — to the
+currently-healthy tunnel, and `/api/dograh/config` returns same-origin
+`<origin>/free/ui` + `<origin>/free/api` URLs (token unchanged). Endpoint
+resolution: local `public/dograh-endpoints.json` first, then the GitHub
+raw copy (so the Render server never waits for a redeploy), 45s cache,
+2-attempt retry with forced re-resolution, redirect remapping so tunnel
+hostnames never leak to the browser. A tunnel rotation now heals the live
+site within ~45 seconds with **no Render deploy in the loop at all**.
+Also (2026-10-08): the voice test page's greeting is TEXT-only — no voice
+speaks on page load; replies still play during an active call.
+
+## Never unreachable — the six layers
 
 1. **Self-heal (automatic, ≤5 min):** the scheduler task runs the watchdog
    every 5 minutes around the clock; it recycles dead/limbo tunnels and
@@ -175,17 +208,20 @@ creds the watchdog logs `telegram heal alerts not configured` and carries on.
    Cloudflare's edge propagates; the watchdog waits (bounded) before
    committing URLs and treats a fresh edge registration as "propagating",
    not "dead" — no more URL churn during heal windows.
-2. **In-server sentinel (PC only, automatic):** the site server probes the
+2. **Origin-stack heal (PC, automatic):** restart policies `unless-stopped`
+   on all containers + the watchdog's `ensureOriginStack()` (see above) —
+   Docker/host restarts no longer leave the app behind the tunnels dead.
+3. **In-server sentinel (PC only, automatic):** the site server probes the
    free line in every watchdog cycle. If it's down AND the scheduler
    heartbeat (`watchdog.heartbeat`, touched by every watchdog exit) is
    stale >8 min, the server spawns the tunnel watchdog itself (fire-and-
    forget, rate-capped 1×/20 min) and sends a 🛟 Telegram alert — so a wedged
    scheduler can no longer leave the line down.
-3. **Server-side eyes (automatic alert):** any Dograh outage gets a 🚨 alert
+4. **Server-side eyes (automatic alert):** any Dograh outage gets a 🚨 alert
    with a **🔧 Fix: fix-dograh-tunnels** button; `/diagnose` lists it too,
    and `/health` shows a `dograh free line` row. One tap spawns the repair
    and reports the outcome as a follow-up message.
-4. **Permanent URLs (SET UP 2026-10-01 — one manual step left):** the named
+5. **Permanent URLs (SET UP 2026-10-01 — one manual step left):** the named
    tunnel **secondshift-dograh** (id `59db6928-a6a1-465d-9ed9-55b81bd81328`)
    exists and runs as the `dograh-named-tunnel` container (http2, 4 edge
    connections, creds + config in the `dograh-cf-creds` docker volume).
@@ -205,7 +241,7 @@ creds the watchdog logs `telegram heal alerts not configured` and carries on.
    retires the quick-tunnel containers, and pushes — Render deploys the
    permanent URLs. Zero downtime, no manual commit. Quick tunnels and URL
    rotation cease to exist.
-5. **If the PC itself is down:** nothing self-hosted can answer — the site
+6. **If the PC itself is down:** nothing self-hosted can answer — the site
    correctly shows the gray offline state and the free mic + Vapi lines keep
    working. That limit is physics, not config.
 
@@ -220,7 +256,8 @@ creds the watchdog logs `telegram heal alerts not configured` and carries on.
    so one port-forward finishes this. Until then, tunnel URLs alone are not
    enough for outside callers — WebRTC media can't reach coturn.
 3. Quick-tunnel URLs rotate on tunnel restarts; the watchdog heals them
-   within ≤5 min + Render deploy time (~1 min). A **named Cloudflare tunnel**
+   within ≤5 min, and the same-origin proxy serves the new URLs ~45s later
+   with no Render deploy wait. A **named Cloudflare tunnel**
    on your own domain removes even that gap.
 
 ## Where transcripts go

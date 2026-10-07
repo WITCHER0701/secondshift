@@ -112,6 +112,156 @@ function safeEqual(a, b) {
 app.disable('x-powered-by');
 // behind Render's proxy, req.ip/protocol come from X-Forwarded-* headers
 app.set('trust proxy', 1);
+
+// ── free line: same-origin proxy to the live Dograh tunnels ─────────────
+// Quick tunnels rotate every few hours, and each rotation used to reach
+// visitors only after commit → push → Render redeploy — the free line sat
+// "warming up" for 10+ minutes every time. Two fixes live here:
+//   1. This server proxies /free/api/* and /free/ui/* to whichever tunnel
+//      registration is healthy right now, so the URLs a visitor's browser
+//      uses NEVER change — rotation becomes invisible (and unbranded).
+//   2. Endpoints resolve live: the local tracked file first (freshest on
+//      the PC, where the watchdog writes it), then GitHub raw, which the
+//      watchdog pushes within minutes of a rotation — so a Render deploy
+//      no longer has to land before visitors can call again.
+// Registered BEFORE express.json so request bodies and websocket upgrades
+// stream through untouched.
+const FREE_LINE_RAW_URL = process.env.DOGRAH_ENDPOINTS_RAW_URL ||
+  'https://raw.githubusercontent.com/WITCHER0701/secondshift/main/public/dograh-endpoints.json';
+let freeLineMemo = null;            // { at, eps } — 45s cache, invalidated on failure
+const FREE_LINE_TTL = 45 * 1000;
+
+const fetchJsonFresh = async (url, timeoutMs = 6000) => {
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: ac.signal, cache: 'no-store' });
+    return r.ok ? await r.json() : null;
+  } catch (_) { return null; } finally { clearTimeout(to); }
+};
+
+const tunnelAlive = async (base) => {
+  try {
+    const ac = new AbortController();
+    const to = setTimeout(() => ac.abort(), 6000);
+    const r = await fetch(base + '/api/v1/health', { signal: ac.signal, cache: 'no-store' });
+    clearTimeout(to);
+    return r.ok;
+  } catch (_) { return false; }
+};
+
+async function resolveEndpoints(force = false) {
+  if (!force && freeLineMemo && Date.now() - freeLineMemo.at < FREE_LINE_TTL) return freeLineMemo.eps;
+  const norm = (j) => (j && j.token && j.uiUrl && j.apiUrl)
+    ? { token: j.token, uiUrl: j.uiUrl.replace(/\/$/, ''), apiUrl: j.apiUrl.replace(/\/$/, '') } : null;
+  const local = norm(readDograhEndpoints());
+  const remote = norm(await fetchJsonFresh(FREE_LINE_RAW_URL));
+  // local first (freshest where the watchdog writes it), remote second;
+  // skip the remote probe when it's identical to the local copy
+  const cands = [];
+  if (local) cands.push(local);
+  if (remote && (!local || remote.apiUrl !== local.apiUrl)) cands.push(remote);
+  let eps = null;
+  for (const c of cands) { if (await tunnelAlive(c.apiUrl)) { eps = c; break; } }
+  if (!eps && cands.length) eps = cands[0]; // best effort — the proxy retries live per request
+  freeLineMemo = { at: Date.now(), eps };
+  return eps;
+}
+
+// follow a redirect only when it stays on OUR tunnels (never an open proxy);
+// returns { which, path } so the hop goes back through this same handler
+function mapRedirectToTunnel(location, eps) {
+  try {
+    const u = new URL(location);
+    for (const which of ['apiUrl', 'uiUrl']) {
+      const t = new URL(eps[which]);
+      if (u.host === t.host) return { which, path: u.pathname + u.search };
+    }
+  } catch (_) {}
+  return null;
+}
+
+function pipeThrough(req, res, targetUrl, eps, depth) {
+  return new Promise((resolve) => {
+    let u;
+    try { u = new URL(targetUrl); } catch (_) { resolve(false); return; }
+    const mod = u.protocol === 'https:' ? require('https') : require('http');
+    const up = mod.request(u, { method: req.method, headers: { ...req.headers, host: u.host }, timeout: 20000 }, (upRes) => {
+      const loc = upRes.headers.location;
+      const mapped = loc && (req.method === 'GET' || req.method === 'HEAD') && depth < 3
+        ? mapRedirectToTunnel(loc, eps) : null;
+      if (mapped) {
+        upRes.resume(); // drain the redirect body
+        resolve(pipeThrough(req, res, eps[mapped.which] + (mapped.path || '/'), eps, depth + 1));
+        return;
+      }
+      res.writeHead(upRes.statusCode || 502, upRes.headers);
+      upRes.pipe(res);
+      upRes.on('end', () => resolve(true));
+      upRes.on('error', () => resolve(true)); // headers already sent — nothing to recover
+    });
+    up.on('timeout', () => up.destroy(new Error('upstream timeout')));
+    up.on('error', () => resolve(false));
+    req.pipe(up);
+    req.on('error', () => { try { up.destroy(); } catch (e) {} resolve(false); });
+  });
+}
+
+app.use('/free', async (req, res) => {
+  const isApi = req.path === '/api' || req.path.startsWith('/api/');
+  const which = isApi ? 'apiUrl' : 'uiUrl';
+  const suffix = req.path.replace(/^\/(api|ui)/, '') || '/';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const eps = await resolveEndpoints(attempt > 0);
+    if (!eps || !eps[which]) {
+      res.status(503).type('text').send('free line is starting — try again in a moment');
+      return;
+    }
+    if (await pipeThrough(req, res, eps[which] + suffix, eps, 0)) return;
+    // upstream refused — endpoints may have rotated mid-request: force a fresh
+    // resolution and retry once before giving up
+  }
+  if (!res.headersSent) res.status(502).type('text').send('free line hiccup — try again in a moment');
+});
+
+// websockets (the widget's signaling + audio streaming) bypass express entirely;
+// tunnel the raw upgrade through to the same upstream the HTTP proxy picked
+function attachFreeLineWs(server) {
+  server.on('upgrade', async (req, socket, head) => {
+    if (!req.url.startsWith('/free/')) { try { socket.destroy(); } catch (e) {} return; }
+    const isApi = req.url.startsWith('/free/api');
+    const which = isApi ? 'apiUrl' : 'uiUrl';
+    const eps = await resolveEndpoints(true);
+    if (!eps || !eps[which]) { try { socket.destroy(); } catch (e) {} return; }
+    let u;
+    try { u = new URL(eps[which]); } catch (_) { try { socket.destroy(); } catch (e) {} return; }
+    const tls = u.protocol === 'https:';
+    const netMod = tls ? require('tls') : require('net');
+    const up = netMod.connect({ host: u.hostname, port: Number(u.port) || (tls ? 443 : 80), servername: u.hostname }, () => {
+      let out = `GET ${req.url.replace(/^\/free\/(api|ui)/, '') || '/'} HTTP/1.1\r\n`;
+      for (const [k, v] of Object.entries({ ...req.headers, host: u.host })) out += `${k}: ${v}\r\n`;
+      out += '\r\n';
+      up.write(out);
+      if (head && head.length) up.write(head); // early client bytes after the upgrade head
+    });
+    let handshake = Buffer.alloc(0);
+    const onData = (chunk) => {
+      handshake = Buffer.concat([handshake, chunk]);
+      const idx = handshake.indexOf('\r\n\r\n');
+      if (idx === -1) return;
+      up.removeListener('data', onData);
+      socket.write(handshake.slice(0, idx + 4));          // upstream's 101 (or refusal) verbatim
+      const rest = handshake.slice(idx + 4);
+      if (rest.length) socket.write(rest);
+      socket.pipe(up); up.pipe(socket);                   // raw frames both ways from here
+    };
+    up.on('data', onData);
+    const cleanup = () => { try { socket.destroy(); } catch (e) {} try { up.destroy(); } catch (e) {} };
+    socket.on('error', cleanup); up.on('error', cleanup);
+    socket.on('close', cleanup); up.on('close', cleanup);
+  });
+}
+
 app.use(express.json());
 // 5xx tap — FIRST middleware: alerts Telegram on any server-error response
 // (deduped per route inside the monitor; no-op when Telegram isn't configured)
@@ -342,13 +492,15 @@ function readDograhEndpoints() {
   } catch (e) { /* file missing/malformed — fall through to env */ }
   return null;
 }
-app.get('/api/dograh/config', (req, res) => {
-  const file = readDograhEndpoints();
-  const token = (file && file.token) || process.env.DOGRAH_EMBED_TOKEN || '';
-  const ui = (file && file.uiUrl) || (process.env.DOGRAH_UI_URL || '').replace(/\/$/, '');
-  const api = (file && file.apiUrl) || (process.env.DOGRAH_API_URL || '').replace(/\/$/, '');
-  if (!token || !ui || !api) return res.json({ configured: false });
-  res.json({ configured: true, token, uiUrl: ui, apiUrl: api });
+app.get('/api/dograh/config', async (req, res) => {
+  const eps = await resolveEndpoints();
+  const token = (eps && eps.token) || process.env.DOGRAH_EMBED_TOKEN || '';
+  if (!token || !eps || !eps.uiUrl || !eps.apiUrl) return res.json({ configured: false });
+  // The page gets SAME-ORIGIN URLs (/free/*) which this server proxies to the
+  // healthy tunnel — so tunnel rotation never reaches the visitor and the raw
+  // tunnel hostnames never appear in a browser payload.
+  const origin = req.protocol + '://' + req.get('host');
+  res.json({ configured: true, token, uiUrl: origin + '/free/ui', apiUrl: origin + '/free/api' });
 });
 app.get('/api/voice/appointments', requireAdmin, (req, res) => res.json({ appointments: store.listAppointments().slice(0, 50) }));
 app.get('/api/voice/session/:id', (req, res) => {
@@ -625,7 +777,8 @@ if (require.main === module) {
     if (r.restored) console.log('[cloud] ✔ Restored newer data from ' + store.cloudStatus().provider + ' (' + r.remoteUpdatedAt + ') — local copy backed up as lab.json.local-backup');
     else if (r.reason && !/local mode|local is newer/.test(r.reason)) console.log('[cloud] note: ' + r.reason);
   })();
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
+    attachFreeLineWs(server); // websocket passthrough for the free line
     const cs = store.cloudStatus();
     console.log('──────────────────────────────────────────');
     console.log('  SecondShift — by Rishi Raj Singh');

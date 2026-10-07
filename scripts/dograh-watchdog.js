@@ -47,6 +47,54 @@ const UI_TUNNEL = 'dograh-ui-tunnel';
 const PERM_API = (process.env.DOGRAH_PERM_API || 'https://voice.secondshift.space').replace(/\/$/, '');
 const PERM_UI = (process.env.DOGRAH_PERM_UI || 'https://voice-ui.secondshift.space').replace(/\/$/, '');
 
+// ── origin stack: the containers the tunnels exist to serve ─────────────
+// Tunnels can be perfectly healthy while the app behind them is dead: after
+// a Docker daemon or host restart the api/ui/postgres/redis containers used
+// to stay exited (255) and every URL answered errors while the watchdog
+// chased phantom tunnel problems. Restart policies now revive them on daemon
+// start, but policies only fire once — this catches everything else, and it
+// must run BEFORE any tunnel judgement so a dead origin is never mistaken
+// for a dead tunnel.
+const ORIGIN_CONTAINERS = ['dograh-api-1', 'dograh-ui-1', 'dograh-postgres-1', 'dograh-redis-1'];
+const COMPOSE_FILE = path.join(ROOT, 'dograh', 'docker-compose.yaml');
+
+async function listRunningContainers() {
+  try {
+    const out = await sh('docker ps --format "{{.Names}}"', { timeout: 15000 });
+    return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  } catch (e) { return null; } // docker unreachable — never assume the stack is down
+}
+
+/** Brings the app containers back if any of them is stopped. */
+async function ensureOriginStack() {
+  const running = await listRunningContainers();
+  if (!running) return;
+  const dead = ORIGIN_CONTAINERS.filter((c) => !running.includes(c));
+  if (!dead.length) return;
+  log(`origin stack down (${dead.join(', ')}) — docker compose up -d`);
+  try { await sh(`docker compose -f "${COMPOSE_FILE}" up -d`, { timeout: 120000 }); }
+  catch (e) { log(`compose up failed: ${String(e.message).slice(0, 160)}`); }
+  // bounded wait for the api container's healthcheck, so the tunnel logic
+  // below judges a LIVE origin instead of a booting one
+  const deadline = Date.now() + 150 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(5 * SLEEP);
+    const now = await listRunningContainers();
+    if (!now) return;
+    let allUp = true;
+    for (const c of ORIGIN_CONTAINERS) {
+      if (!now.includes(c)) { allUp = false; break; }
+      try {
+        const st = (await sh(`docker inspect -f "{{.State.Health.Status}}" ${c}`, { timeout: 10000 })).trim();
+        if (st && st !== 'healthy') { allUp = false; break; } // containers without a healthcheck pass through
+      } catch (_) { /* no healthcheck — running is good enough */ }
+    }
+    if (allUp) { log('origin stack healthy again'); return; }
+  }
+  log('WARNING: origin stack still not fully healthy — continuing with tunnel logic');
+  await alertOnce('origin', '⚠️ The Dograh app containers were down (Docker restart) — I restarted them and am watching for the free line to come back. Nothing to do — I retry every 5 minutes.');
+}
+
 // Windows-hardened shell runner. The previous execSync version hung forever
 // inside Node's captured stdout pipe when a child (docker on a busy daemon)
 // stalled without exiting — that wedged the 01:03 scheduler run, and the
@@ -250,6 +298,7 @@ async function recycle(reason) {
 }
 
 async function main() {
+  await ensureOriginStack();
   let ep = readEndpoints();
 
   // ── one-time transition: permanent URLs live → adopt them everywhere ──

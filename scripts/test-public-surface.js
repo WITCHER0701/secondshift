@@ -123,7 +123,13 @@ const httpGet = (urlPath) =>
         const extra = Object.keys(cfg).filter((k) => !allowed.includes(k));
         t(extra.length === 0, 'free-line config exposes only the widget fields it needs', extra.join(', ') || allowed.join('/'));
         const urls = [cfg.uiUrl, cfg.apiUrl].filter(Boolean);
-        t(urls.every((u) => /^https:\/\//.test(u)), 'free-line URLs are https only');
+        // Same-origin proxy contract: the config must hand visitors URLs on
+        // THIS origin under /free/ — never a third-party tunnel host (which
+        // rotates and dies) and never a bare external origin. The scheme
+        // matches the page's own (https on Render, http on localhost), so
+        // mixed content is impossible by construction.
+        const origin = 'http://localhost:4000';
+        t(urls.length === 2 && urls.every((u) => u.startsWith(origin + '/free/')), 'free-line URLs are same-origin /free/* (proxy contract)', urls.join(' | ') || 'none');
       }
     }
 
