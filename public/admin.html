@@ -90,7 +90,54 @@
     <button data-tab="pipeline" class="on">Pipeline</button>
     <button data-tab="clients">Clients & Billing</button>
     <button data-tab="voice">Voice Ops</button>
+    <button data-tab="office">🤖 Self Learner</button>
   </div>
+
+  <!-- SELF LEARNER (AUTOMATON OFFICE) TAB -->
+  <div id="tab-office" style="display:none">
+    <div class="panel" style="padding:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <h3 style="margin:0;flex:1">Automaton Office — <span class="muted" style="font-weight:400;font-size:12.5px">Self Learner, live</span></h3>
+        <input id="officeUrl" type="text" placeholder="http://localhost:7777"
+          style="background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:8px;padding:6px 10px;font-size:12px;width:280px">
+        <button class="btn btn-ghost btn-sm" id="officeUrlSave" style="font-size:12px">Connect</button>
+      </div>
+      <iframe id="officeFrame" title="Automaton live status" loading="lazy"
+        style="width:100%;height:700px;border:0;display:block;border-radius:8px;background:#10122a"></iframe>
+      <div id="officeOffline" style="display:none;padding:12px 14px;font-size:12.5px;color:var(--text-3);line-height:1.7">
+        🌙 Can't reach the office — the laptop running <b>Self Learner</b> is asleep/offline, or the dashboard/tunnel URL is wrong.
+        The agent keeps its memory (state.db) and resumes where it left off when the laptop wakes.<br>
+        <span class="muted">Local: http://localhost:7777 · Remote: set up <code>cloudflared</code> and paste your tunnel URL (e.g. https://status.secondshift.space) above.</span>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const KEY = 'secondshift_office_url';
+    const input = document.getElementById('officeUrl');
+    const frame = document.getElementById('officeFrame');
+    const offline = document.getElementById('officeOffline');
+    input.value = localStorage.getItem(KEY) || 'http://localhost:7777';
+    function connect() {
+      let u = (input.value || '').trim().replace(/\/+$/, '');
+      if (!u) return;
+      localStorage.setItem(KEY, u);
+      offline.style.display = 'none';
+      frame.src = u + '/embed.html';
+      // health probe: show fallback if unreachable
+      fetch(u + '/api/health', { mode: 'cors' })
+        .then(r => r.json())
+        .then(h => { if (!h.ok) throw 0; })
+        .catch(() => { offline.style.display = 'block'; });
+    }
+    document.getElementById('officeUrlSave').addEventListener('click', connect);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+    // connect lazily the first time the tab is opened
+    document.querySelector('.tabbar button[data-tab="office"]').addEventListener('click', function once() {
+      if (!frame.src) connect();
+    });
+  })();
+  </script>
 
   <!-- PIPELINE TAB -->
   <div id="tab-pipeline">
@@ -386,7 +433,7 @@
   document.querySelectorAll('.tabbar button').forEach(btn => btn.addEventListener('click', () => {
     document.querySelectorAll('.tabbar button').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
-    ['pipeline', 'clients', 'voice'].forEach(t => { const el = $('tab-' + t); if (el) el.style.display = btn.dataset.tab === t ? 'block' : 'none'; });
+    ['pipeline', 'clients', 'voice', 'office'].forEach(t => { const el = $('tab-' + t); if (el) el.style.display = btn.dataset.tab === t ? 'block' : 'none'; });
   }));
 
   // onboard client form
