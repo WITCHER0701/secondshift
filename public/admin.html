@@ -117,7 +117,7 @@
     const input = document.getElementById('officeUrl');
     const frame = document.getElementById('officeFrame');
     const offline = document.getElementById('officeOffline');
-    input.value = localStorage.getItem(KEY) || 'http://localhost:7777';
+    input.value = localStorage.getItem(KEY) || 'https://status.secondshift.space';
     function connect() {
       let u = (input.value || '').trim().replace(/\/+$/, '');
       if (!u) return;
