@@ -706,11 +706,29 @@ app.post('/admin/api/cloud/pull', requireAdmin, async (req, res) => {
 });
 
 // ── health check (Render + uptime monitors) ─────────────────────────
+let lastDograhProbeAt = 0;
+let lastDograhProbeOk = true;
 app.get('/healthz', (req, res) => {
   // Bare-minimum payload: this endpoint is public, so it says "up" and nothing
   // about our tooling ("on"/"off" instead of naming the alerting channel).
-  res.json({ ok: true, service: 'secondshift', time: new Date().toISOString(), monitor: tmon.enabled ? 'on' : 'off' });
+  res.json({
+    ok: true,
+    service: 'secondshift',
+    time: new Date().toISOString(),
+    monitor: tmon.enabled ? 'on' : 'off',
+    // free-line state for the on-screen bot (safe booleans — no internals)
+    line: lastDograhProbeOk ? 'up' : 'down',
+  });
 });
+// lightweight periodic probe so /healthz reflects the free line without
+// avoiding extra fetch load on visitors' requests
+const DOGRAH_LINE_PROBE_MS = 60 * 1000;
+setInterval(async () => {
+  try {
+    const r = await dograhProbe();
+    lastDograhProbeOk = r.ok; lastDograhProbeAt = Date.now();
+  } catch (_) { lastDograhProbeOk = false; lastDograhProbeAt = Date.now(); }
+}, DOGRAH_LINE_PROBE_MS).unref();
 
 // ── boot ──────────────────────────────────────────────────────────────
 if (require.main === module) {
