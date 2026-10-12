@@ -346,12 +346,28 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // Root serves the new React UI. The pre-2026-10 landing page stays reachable
 // at /index-old.html for instant comparison/rollback (hidden, not linked).
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  // stamp Cloudflare's country AFTER sendFile kicked off — sendFile can't
+  // be intercepted, so the UI also accepts a JS-readable cookie set here.
+  const cc = String(req.headers['cf-ipcountry'] || '').toUpperCase();
+  if (cc && /^[A-Z]{2}$/.test(cc)) res.setHeader('Set-Cookie', 'ss-country-geo=' + cc + '; Path=/; Max-Age=86400; SameSite=Lax');
+});
 
 // Named SPA routes — the React UI is a single page with in-page anchors, so
 // any stray deep link resolves to it instead of an Express 404 (the old
 // landing pages like /automations.html stay untouched static files).
 app.get(['/studio', '/studio/*'], (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// Country stamp: the UI auto-detects the visitor's country. Browsers can't
+// read Cloudflare's cf-ipcountry header directly, so the server (which sees
+// it on the live deployment) writes it into the served HTML as a data
+// attribute for the UI to pick up. Local/other hosts simply omit it.
+app.get('/', (req, res, next) => {
+  const cc = String(req.headers['cf-ipcountry'] || '').toUpperCase();
+  if (cc && /^[A-Z]{2}$/.test(cc)) res.locals.country = cc;
+  next();
+});
 
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
