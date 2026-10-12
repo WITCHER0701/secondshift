@@ -19,6 +19,13 @@
  *
  * Skins: reads the same ss-bot-skin localStorage as the React widget;
  * long-press / right-click on the bot opens the character picker.
+ *
+ * Beginner tour (voice.html only): add data-tour="1". On the FIRST visit
+ * only (ss-strobi-tour-done in localStorage) Strobi walks the newcomer
+ * through Hold-to-talk, Open mic and the booking slot pills with a
+ * highlighted tooltip anchored to each control. Any tap/click/Escape
+ * advances or ends it; the manual tour can always be re-run from the
+ * widget card via SSStrobi.tour().
  */
 (function () {
   'use strict';
@@ -36,6 +43,7 @@
   try { if (CHARACTERS[localStorage.getItem('ss-bot-skin')]) skinId = localStorage.getItem('ss-bot-skin'); } catch (e) {}
 
   var isVoicePage = !!(document.currentScript && document.currentScript.getAttribute('data-voice'));
+  var isTour = !!(document.currentScript && document.currentScript.getAttribute('data-tour'));
   var isPhone = /iPhone|Android|webOS|BlackBerry|Opera Mini|IEMobile/i.test(navigator.userAgent);
   var sizePx = isPhone ? 64 : 84;
 
@@ -54,6 +62,16 @@
     '.ss-strobi-skin.on{border-color:#38bdf8}',
     '.ss-strobi-skin span{position:absolute;top:6px;left:18px;width:6px;height:6px;border-radius:50%}',
     '@media(max-width:640px){.ss-strobi-card{width:220px;right:10px;bottom:' + (sizePx + 16) + 'px}}',
+    // beginner tour
+    '.ss-tour-backdrop{position:fixed;inset:0;background:rgba(2,6,14,.62);z-index:2147482000;opacity:0;transition:opacity .25s}',
+    '.ss-tour-backdrop.on{opacity:1}',
+    '.ss-tour-tip{position:absolute;z-index:2147482500;width:min(64vw,260px);background:#0e1420;border:1px solid rgba(56,189,248,.55);border-radius:14px;padding:12px 14px;color:#e2e2e8;font:12px/1.55 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.7),0 0 24px rgba(56,189,248,.25);opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s}',
+    '.ss-tour-tip.on{opacity:1;transform:none}',
+    '.ss-tour-tip b{color:#8ed5ff}',
+    '.ss-tour-tip .ss-tip-step{font:9px/1 monospace;color:#64748B;letter-spacing:.08em;text-transform:uppercase}',
+    '.ss-tour-tip .ss-tip-next{display:block;margin-top:8px;width:100%;padding:7px 0;border:0;border-radius:9px;background:linear-gradient(90deg,#38bdf8,#0053db);color:#f8fafc;font:600 11px Inter,system-ui,sans-serif;cursor:pointer}',
+    '.ss-tour-ring{position:absolute;z-index:2147482400;border-radius:14px;box-shadow:0 0 0 4px rgba(56,189,248,.55),0 0 30px rgba(56,189,248,.6);pointer-events:none;opacity:0;transition:opacity .2s}',
+    '.ss-tour-ring.on{opacity:1}',
   ].join('\n');
   document.head.appendChild(style);
 
@@ -189,5 +207,153 @@
         else if (!shown) offered = false;
       }).observe(note, { attributes: true, attributeFilter: ['class'] });
     })();
+
+    // ── beginner tour (data-tour="1", first visit only) ───────────────
+    var TOUR_DONE = 'ss-strobi-tour-done';
+    var tourSteps = [
+      {
+        sel: '.ptt-pill[data-mode="ptt"]',
+        title: '🖐 Hold to talk',
+        body: 'Press and HOLD the hand pill while you speak — release and the line goes quiet. Best in a noisy room.',
+        anim: 'listening',
+      },
+      {
+        sel: '.ptt-pill[data-mode="open"]',
+        title: '📡 Open mic',
+        body: 'Lazy option: tap once and the mic stays open — just talk naturally, like a phone call. Tap End call when done.',
+        anim: 'listening',
+      },
+      {
+        sel: '#micBtn',
+        title: 'The big mic',
+        body: 'This starts the call. Allow the mic when the browser asks — everything runs free, right in your browser.',
+        anim: 'happy',
+      },
+      {
+        sel: '#slotService',
+        title: '📅 Booking slots',
+        body: 'As you talk, the agent fills these in WHAT you want, WHEN, your NAME and PHONE. When all four turn green — you are booked.',
+        anim: 'thinking',
+      },
+      {
+        sel: null, // anchor to the bot itself
+        title: "I'm Strobi",
+        body: 'I play along with the call — thinking, listening, celebrating your booking. Tap me anytime, and have a good first call. 🎉',
+        anim: 'celebrate',
+      },
+    ];
+
+    var tourState = null; // { i, backdrop, tip, ring } — non-null while on tour
+    function clearTourDom() {
+      if (!tourState) return;
+      if (tourState.backdrop) tourState.backdrop.remove();
+      if (tourState.tip) tourState.tip.remove();
+      if (tourState.ring) tourState.ring.remove();
+      document.removeEventListener('keydown', tourKeyAdv); // eslint-disable-line no-use-before-define
+      tourState = null;
+      var ring = document.querySelectorAll('.ss-tour-ring');
+      for (var k = 0; k < ring.length; k++) ring[k].remove();
+      play(isVoicePage ? 'idle' : 'working');
+    }
+    function tourKeyAdv(ev) {
+      if (ev.key === 'Escape') { endTour(true); }
+      else if (ev.key === 'Enter' || ev.key === 'ArrowRight') { stepTour(); }
+    }
+    function endTour(early) {
+      try { localStorage.setItem(TOUR_DONE, '1'); } catch (e) {}
+      clearTourDom();
+    }
+    function stepTour() {
+      if (!tourState) return;
+      var i = tourState.i + 1;
+      if (i >= tourSteps.length) { endTour(); return; }
+      showTourStep(i);
+    }
+    function showTourStep(i) {
+      var step = tourSteps[i];
+      tourState.i = i;
+      var target = step.sel ? document.querySelector(step.sel) : btn;
+      if (!target && step.sel) {
+        // control missing (mobile layout etc.) — skip the step
+        if (i + 1 >= tourSteps.length) { endTour(); return; }
+        showTourStep(i + 1); return;
+      }
+      // highlight ring
+      var r = tourState.ring;
+      if (target) {
+        var b = target.getBoundingClientRect();
+        r.style.left = (b.left - 6) + 'px';
+        r.style.top = (b.top - 6) + 'px';
+        r.style.width = (b.width + 12) + 'px';
+        r.style.height = (b.height + 12) + 'px';
+        r.classList.add('on');
+      } else { r.classList.remove('on'); }
+      // tooltip, positioned toward page center away from the highlight
+      var tip = tourState.tip;
+      tip.innerHTML = '<span class="ss-tip-step">Step ' + (i + 1) + ' of ' + tourSteps.length + '</span>'
+        + '<div style="margin-top:4px"><b>' + step.title + '</b></div>'
+        + '<div style="margin-top:5px;color:#bdc8d1">' + step.body + '</div>'
+        + '<button class="ss-tip-next" type="button">' + (i + 1 >= tourSteps.length ? 'Got it — start the call' : 'Next') + '</button>';
+      tip.querySelector('.ss-tip-next').addEventListener('click', function (ev) {
+        ev.stopPropagation(); stepTour();
+      });
+      // position: below the target if room, otherwise above; clamp to viewport (16px margin)
+      tip.style.visibility = 'hidden';
+      tip.style.display = 'block';
+      tip.style.left = '0px'; tip.style.top = '0px';
+      tip.classList.add('on');
+      var tw = tip.offsetWidth, th = tip.offsetHeight;
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var x, y;
+      if (target) {
+        var b2 = target.getBoundingClientRect();
+        x = Math.max(16, Math.min(b2.left + b2.width / 2 - tw / 2, vw - tw - 16));
+        y = b2.bottom + th + 12 <= vh ? b2.bottom + 12 : Math.max(12, b2.top - th - 12);
+      } else {
+        x = Math.max(16, Math.min(vw - tw - 96, vw - tw - 16));
+        y = vh - th - (isPhone ? 160 : 170);
+      }
+      tip.style.left = Math.round(x) + 'px';
+      tip.style.top = Math.round(y) + 'px';
+      tip.style.visibility = 'visible';
+      play(step.anim);
+      // advance on any outside click too — beginners just tap around
+    }
+    function stepOnOutside(ev) {
+      if (!tourState) return;
+      if (ev.target.closest && ev.target.closest('.ss-tour-tip')) return;
+      stepTour();
+    }
+    function startTour() {
+      if (tourState) return;
+      var backdrop = document.createElement('div');
+      backdrop.className = 'ss-tour-backdrop';
+      var tip = document.createElement('div');
+      tip.className = 'ss-tour-tip';
+      var ring = document.createElement('div');
+      ring.className = 'ss-tour-ring';
+      document.body.appendChild(backdrop);
+      document.body.appendChild(tip);
+      document.body.appendChild(ring);
+      tourState = { i: -1, backdrop: backdrop, tip: tip, ring: ring };
+      requestAnimationFrame(function () { backdrop.classList.add('on'); });
+      document.addEventListener('click', stepOnOutside, true);
+      document.addEventListener('keydown', tourKeyAdv);
+      showTourStep(0);
+    }
+    window.SSStrobi.tour = function () { clearTourDom(); startTour(); };
+    if (isTour) {
+      var already = false;
+      try { already = !!localStorage.getItem(TOUR_DONE); } catch (e) {}
+      if (!already) {
+        // wait for the mic controls to exist, then give the page a beat to settle
+        var tryTour = 0;
+        (function waitUi() {
+          var ok = document.querySelector('.ptt-pill') && document.querySelector('#micBtn') && document.querySelector('#slotService');
+          if (!ok && tryTour++ < 40) { setTimeout(waitUi, 300); return; }
+          setTimeout(startTour, 900);
+        })();
+      }
+    }
   }
 })();
