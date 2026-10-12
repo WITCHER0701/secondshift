@@ -21,6 +21,7 @@
  */
 const path = require('path');
 const agentRunner = require('./agent-runner');
+const countryTool = require('./scripts/country-tool');
 
 // ── activation ─────────────────────────────────────────────────────────
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -302,6 +303,7 @@ const HELP_TEXT =
   '/agent <task> — my Codebuff agent does it on the PC and reports back\n' +
   '/agentstatus — what the agent is doing right now\n' +
   '/envcheck — which env vars THIS server has, and which are missing\n' +
+  '/country — detect a user\'s country (IP + Telegram locale)\n' +
   '/help — this menu\n' +
   'Alerts: I message you automatically on crashes, 5xx spikes, and watchdog drift — with a Fix button when a safe remedy exists.';
 
@@ -426,10 +428,11 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
     }
     return run();
   }
-  async function handle(text) {
+  async function handle(text, ctx) {
+    const { userId } = ctx || {};
     const cmd = String(text || '').trim().split(/[\s@]/)[0].toLowerCase();
     state.commands.lastCommandAt = new Date().toISOString();
-    if (cmd === '/status') { state.commands.replies['/status'] = (state.commands.replies['/status'] || 0) + 1; return reply(formatStatus(getSnapshot())); }
+    if (cmd === '/status') { state.commands.replies['/status'] = (state.commands.replies['/status'] || 0) + 1; const snap = getSnapshot(); countryTool.attachSnapshotContext(snap, null, ctx && ctx.userId); return reply(formatStatus(snap)); }
     if (cmd === '/health') {
       state.commands.replies['/health'] = (state.commands.replies['/health'] || 0) + 1;
       try { return reply(formatHealth(await runHealth())); }
@@ -461,6 +464,26 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
     }
     if (cmd === '/agent' || cmd === '/agentstatus') return handleAgent(cmd, text);
     if (cmd === '/help' || cmd === '/start') { state.commands.replies['/help'] = (state.commands.replies['/help'] || 0) + 1; return reply(HELP_TEXT); }
+    if (cmd === '/country') {
+      state.commands.replies['/country'] = (state.commands.replies['/country'] || 0) + 1;
+      const q = String(text || '').trim().slice('/country'.length).trim();
+      try {
+        const r = q ? await countryTool.handleCountry(q) : await countryTool.detectCountry(userId);
+        if (!r.ok) return reply('🔎 /country — ' + r.error);
+        if (!r.country) return reply('🔎 /country — could not detect a country for that user right now. Try again later, or the user has not messaged this bot yet.');
+        return reply('🔎 /country — that user is in ' + r.note + ' (' + r.country + ').');
+      } catch (e) { return reply('🔎 /country failed: ' + String((e && e.message) || e).slice(0, 200)); }
+    }
+    if (cmd === '/locate') {
+      state.commands.replies['/locate'] = (state.commands.replies['/locate'] || 0) + 1;
+      const q = String(text || '').trim().slice('/locate'.length).trim();
+      if (!q) return reply('📍 /locate <place>  — e.g. /locate New York, /locate IN, /locate 40.71,-74.01');
+      try {
+        const r = await countryTool.locateUser(userId, q);
+        if (!r.ok) return reply('📍 /locate — ' + r.error);
+        return reply('📍 /locate — ' + r.note + (r.country ? ' · country: ' + (countryTool.countryName(r.country) || r.country) : '') + '.');
+      } catch (e) { return reply('📍 /locate failed: ' + String((e && e.message) || e).slice(0, 200)); }
+    }
     if (cmd.startsWith('/')) return reply('Unknown command ' + cmd + ' — try /help');
     return null; // plain messages are ignored
   }
@@ -518,7 +541,10 @@ function startCommands({ getSnapshot = () => ({}), runHealth = async () => [], r
         const fromChat = u.message && u.message.chat && String(u.message.chat.id);
         if (!fromChat || fromChat !== String(CHAT_ID)) continue;
         const msg = u.message && u.message.text ? u.message.text : '';
-        try { await handle(msg); } catch (_) { /* never die on a bad update */ }
+        const userId = String(u.message && u.message.from && u.message.from.id);
+        try { await handle(msg, { userId }); } catch (_) { /* never die on a bad update */ }
+        // country cache: detect + cache the sender's country so future /status replies carry it
+        countryTool.attachSnapshotContext({}, fromChat, userId);
       }
       if (!updates.length) await new Promise((r) => setTimeout(r, pollPauseMs));
     }
