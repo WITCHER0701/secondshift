@@ -28,6 +28,32 @@
   .tabbar { display: flex; gap: 8px; }
   .tabbar button { border: 1.5px solid var(--line-strong); background: var(--bg-card); padding: 9px 18px; border-radius: 99px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text-2); transition: all .25s; }
   .tabbar button.on { border-color: var(--accent); color: var(--accent); background: rgba(41,151,255,.08); }
+
+  /* ── responsive admin (2026-10-12): grids collapse, tables become cards,
+     tabbar scrolls, login pads properly on phone landscape ── */
+  @media (max-width: 900px) {
+    .tabbar { overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+    .tabbar button { white-space: nowrap; flex: 0 0 auto; }
+    /* every inline 2-col grid stacks */
+    .dash div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+    .panel { padding: 20px 16px; }
+    .dash { padding: calc(var(--nav-h) + 20px) 14px 60px; }
+    /* tables → readable stacked cards */
+    .table-wrap table { min-width: 0; }
+    .table-wrap thead { display: none; }
+    .table-wrap tr { display: block; background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 10px; }
+    .table-wrap td { display: block; padding: 3px 0; border: 0; text-align: left; }
+    .table-wrap td::before { content: attr(data-th); display: inline-block; min-width: 88px; color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .table-wrap td:last-child::before { content: ''; min-width: 0; }
+    .kpi .v { font-size: 1.45rem; }
+  }
+  @media (max-width: 480px) {
+    .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .login-card { padding: 28px 22px; }
+    .login-wrap { padding: 14px; align-items: flex-start; margin-top: 12vh; }
+    .dash h1 { font-size: 1.45rem; }
+    #officeFrame { height: 560px; }
+  }
 </style>
   <meta property="og:title" content="SecondShift — business automations that work after close">
   <meta property="og:description" content="Test real automations live, then hire them. Built by Rishi Raj Singh.">
@@ -267,11 +293,11 @@
     $('leadRows').innerHTML = leads.leads.map(l => `
       <tr>
         <td><b>${esc(l.name)}</b><br><span class="dim" style="font-size:12px">${esc(l.company)} · ${esc(l.email)}</span><br><span class="dim" style="font-size:11px">${esc(l.industry || '')} · ${ago(l.createdAt)}</span>${l.message ? `<br><span class="dim" style="font-size:12px;display:block;max-width:320px;margin-top:5px">"${esc(l.message.slice(0, 140))}${l.message.length > 140 ? '…' : ''}"</span>` : ''}</td>
-        <td><div class="slugs">${(l.automationSlugs || []).map(s => `<span class="slug-chip">${esc(s)}</span>`).join('')}</div></td>
-        <td>${esc(l.monthlyBudget || '—')}</td>
-        <td>${esc(l.timeline || '—')}</td>
-        <td><span class="chip ${esc(l.status)}">${esc(l.status.replace('_', ' '))}</span></td>
-        <td>
+        <td data-th="Wants"><div class="slugs">${(l.automationSlugs || []).map(s => `<span class="slug-chip">${esc(s)}</span>`).join('')}</div></td>
+        <td data-th="Budget">${esc(l.monthlyBudget || '—')}</td>
+        <td data-th="Timeline">${esc(l.timeline || '—')}</td>
+        <td data-th="Status"><span class="chip ${esc(l.status)}">${esc(l.status.replace('_', ' '))}</span></td>
+        <td data-th="Actions">
           <div class="lead-row-actions" style="display:flex;gap:6px;align-items:center">
             <select data-id="${l.id}" class="statusSel">
               ${order.map(s => `<option value="${s}" ${l.status === s ? 'selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}
@@ -383,11 +409,11 @@
       return `
       <tr>
         <td><b>${esc(c.name || c.company)}</b><br><span class="dim" style="font-size:12px">${esc(c.company)}${c.email ? ' · ' + esc(c.email) : ''}</span><br><span class="dim" style="font-size:11px">since ${new Date(c.startedAt).toLocaleDateString()}</span></td>
-        <td><div class="slugs">${c.slugs.map(s => `<span class="slug-chip">${esc((CATALOG.find(a => a.slug === s) || {}).name || s)}</span>`).join('')}</div></td>
-        <td>${c.cycle}</td>
-        <td><b>$${Math.round(mrr).toLocaleString()}</b></td>
-        <td><span class="chip ${c.status === 'active' ? 'won' : 'lost'}">${esc(c.status)}</span></td>
-        <td>
+        <td data-th="Workers"><div class="slugs">${c.slugs.map(s => `<span class="slug-chip">${esc((CATALOG.find(a => a.slug === s) || {}).name || s)}</span>`).join('')}</div></td>
+        <td data-th="Cycle">${c.cycle}</td>
+        <td data-th="MRR"><b>$${Math.round(mrr).toLocaleString()}</b></td>
+        <td data-th="Status"><span class="chip ${c.status === 'active' ? 'won' : 'lost'}">${esc(c.status)}</span></td>
+        <td data-th="Billing">
           <div style="display:flex;gap:6px;align-items:center">
             <button class="notes-btn genInv" data-id="${c.id}" title="Generate next invoice">🧾 Bill</button>
             <select class="cliStatus" data-id="${c.id}" style="background:var(--bg-card);border:1px solid var(--line-strong);color:var(--text);border-radius:8px;padding:5px 8px;font-size:12px">
