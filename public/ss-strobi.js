@@ -44,6 +44,7 @@
 
   var isVoicePage = !!(document.currentScript && document.currentScript.getAttribute('data-voice'));
   var isTour = !!(document.currentScript && document.currentScript.getAttribute('data-tour'));
+  var dataPage = (document.currentScript && document.currentScript.getAttribute('data-page')) || '';
   var isPhone = /iPhone|Android|webOS|BlackBerry|Opera Mini|IEMobile/i.test(navigator.userAgent);
   var sizePx = isPhone ? 64 : 84;
 
@@ -354,6 +355,88 @@
           setTimeout(startTour, 900);
         })();
       }
+    }
+  }
+
+  // ── page-appropriate reactions (data-page="…") ──────────────────────
+  // Each legacy page passes its real DOM events here instead of duplicating
+  // Strobi logic: deal → celebrates a successful deal submit; test-drive →
+  // thinks while the engine runs a step; automations/process → greets on
+  // reveal; rishi → waves hello. All hooks are fail-soft (no target = no-op).
+  if (dataPage) {
+    function once(jq, ev, fn, opt) { var el = document.querySelector(jq); if (el) el.addEventListener(ev, fn, opt || false); }
+    function pagePlay(anim) { try { window.SSStrobi.play(anim); } catch (e) {} }
+    function pageSay(html) { try { window.SSStrobi.say(html); } catch (e) {} }
+
+    if (dataPage === 'deal') {
+      // celebrate the real success path (dealSuccess panel appears)
+      var dealWatch = setInterval(function () {
+        var ok = document.getElementById('dealSuccess');
+        if (ok && ok.style.display !== 'none') {
+          clearInterval(dealWatch);
+          pagePlay('celebrate');
+          pageSay('<b>Deal received!</b> Rishi will reach out within a day — Strobi keeps the lights on meanwhile. 🎉');
+        }
+      }, 600);
+      setTimeout(function () { clearInterval(dealWatch); }, 120000);
+      // think while the submit is in flight
+      var dealForm = document.getElementById('dealForm');
+      if (dealForm) dealForm.addEventListener('submit', function () {
+        pagePlay('thinking');
+        setTimeout(function () { pagePlay('working'); }, 2500);
+      });
+    }
+
+    if (dataPage === 'test-drive') {
+      // runBtn drives the whole demo: think while it runs, celebrate when it completes
+      var tryRun = 0;
+      (function waitRun() {
+        var rb = document.getElementById('runBtn');
+        if (!rb && tryRun++ < 30) { setTimeout(waitRun, 250); return; }
+        if (!rb) return;
+        rb.addEventListener('click', function () {
+          pagePlay('thinking');
+          pageSay("<b>Engine's firing</b> — watch every step. Not a recording, the real thing.");
+        });
+        document.addEventListener('click', function (ev) {
+          var item = ev.target.closest && ev.target.closest('.check-item');
+          if (item && item.classList.contains('done')) pagePlay('happy');
+        });
+      })();
+    }
+
+    if (dataPage === 'automations') {
+      // greet when the automations grid reveals (LabReveal adds .in)
+      var greetedA = false;
+      document.addEventListener('scroll', function () {
+        if (greetedA) return;
+        var g = document.querySelector('.auto-grid') || document.querySelector('.info-card');
+        if (g && g.getBoundingClientRect().top < window.innerHeight * 0.7) {
+          greetedA = true;
+          pagePlay('happy');
+          pageSay('<b>Strobi here.</b> Every card below is a worker you can actually test — try one.');
+        }
+      }, { passive: true });
+    }
+
+    if (dataPage === 'process') {
+      var greetedP = false;
+      document.addEventListener('scroll', function () {
+        if (greetedP) return;
+        var s = document.querySelector('.step-card');
+        if (s && s.getBoundingClientRect().top < window.innerHeight * 0.7) {
+          greetedP = true;
+          pagePlay('working');
+          pageSay("<b>Four steps, one week.</b> I walk these with Rishi every single time.");
+        }
+      }, { passive: true });
+    }
+
+    if (dataPage === 'rishi') {
+      setTimeout(function () {
+        pagePlay('happy');
+        pageSay('<b>Rishi built me.</b> One person, every system on this site. Ask the Voice line if you want proof.');
+      }, 1600);
     }
   }
 })();
