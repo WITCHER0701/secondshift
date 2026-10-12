@@ -337,6 +337,7 @@ app.use('/dograh-endpoints.json', (req, res) => res.status(404).end());
 // HTML must always revalidate (etag → 304 when unchanged, fresh when edited);
 // hashed/static assets can cache. Prevents visitors getting stale pages.
 app.use(express.static(path.join(__dirname, 'public'), {
+  index: false, // '/' must fall through to the geo-stamping handler below
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
     // hashed bundle files are immutable — a new build gets a new name
@@ -347,11 +348,15 @@ app.use(express.static(path.join(__dirname, 'public'), {
 // Root serves the new React UI. The pre-2026-10 landing page stays reachable
 // at /index-old.html for instant comparison/rollback (hidden, not linked).
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  // stamp Cloudflare's country AFTER sendFile kicked off — sendFile can't
-  // be intercepted, so the UI also accepts a JS-readable cookie set here.
+  // Stamp Cloudflare's visitor country into a JS-readable cookie. res.sendFile
+  // resets headers, so stream the file with fs and set our cookie first.
   const cc = String(req.headers['cf-ipcountry'] || '').toUpperCase();
   if (cc && /^[A-Z]{2}$/.test(cc)) res.setHeader('Set-Cookie', 'ss-country-geo=' + cc + '; Path=/; Max-Age=86400; SameSite=Lax');
+  res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  const stream = fs.createReadStream(path.join(__dirname, 'public', 'index.html'));
+  stream.on('error', () => res.status(500).end());
+  stream.pipe(res);
 });
 
 // Named SPA routes — the React UI is a single page with in-page anchors, so
