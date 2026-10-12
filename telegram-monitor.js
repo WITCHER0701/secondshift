@@ -304,6 +304,7 @@ const HELP_TEXT =
   '/agentstatus — what the agent is doing right now\n' +
   '/envcheck — which env vars THIS server has, and which are missing\n' +
   '/country — detect a user\'s country (IP + Telegram locale)\n' +
+  '/locate <place|lat,lng|CC> — save a user\'s location on the map\n' +
   '/help — this menu\n' +
   'Alerts: I message you automatically on crashes, 5xx spikes, and watchdog drift — with a Fix button when a safe remedy exists.';
 

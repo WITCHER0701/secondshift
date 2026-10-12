@@ -197,7 +197,7 @@ async function locateUser(id, query) {
   u.place = place;
   u.lat = lat;
   u.lng = lng;
-  u.country = country || (countryTool && countryTool.getUserCountry(id));
+  u.country = country || getUserCountry(id);
   u.at = new Date().toISOString();
   LOCATIONS.set(id, u);
   return { ok: true, place, lat, lng, country, note: '📍 located: ' + place + (lat != null ? ' (' + lat.toFixed(3) + ', ' + lng.toFixed(3) + ')' : '') };
