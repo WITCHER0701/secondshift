@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PREVIEW — SecondShift on-screen bot (Strobi)</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; background: #0A0C10; color: #e2e2e8;
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 40px 16px;
+  }
+  .preview-banner {
+    background: rgba(255,193,116,.12); border: 1px solid rgba(255,193,116,.4); color: #ffc174;
+    font: 600 12px/1.4 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase;
+    padding: 10px 18px; border-radius: 999px;
+  }
+  .stage {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px; width: min(1000px, 100%);
+  }
+  .card {
+    background: #10141D; border: 1px solid rgba(255,255,255,.08); border-radius: 20px;
+    padding: 20px; display: flex; flex-direction: column; gap: 14px; align-items: center;
+  }
+  .card h2 { font-size: 14px; margin: 0; color: #94A3B8; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .bot {
+    width: 100%; max-width: 320px; aspect-ratio: 1;
+    background: radial-gradient(circle at 50% 30%, rgba(56,189,248,.12), rgba(16,20,29,0) 65%);
+  }
+  .bubble {
+    align-self: stretch; background: #161B26; border: 1px solid rgba(56,189,248,.25);
+    border-radius: 14px; padding: 12px 14px; font-size: 13px; color: #e2e2e8; min-height: 38px;
+  }
+  .bubble b { color: #8ed5ff; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .controls button {
+    background: #1E2433; color: #e2e2e8; border: 1px solid rgba(255,255,255,.1);
+    border-radius: 999px; padding: 8px 14px; font-size: 12px; cursor: pointer; transition: all .15s;
+  }
+  .controls button:hover { border-color: rgba(56,189,248,.5); color: #8ed5ff; }
+  .credit { font-size: 11px; color: #64748B; max-width: 640px; text-align: center; line-height: 1.6; }
+  .credit a { color: #38bdf8; }
+  .floating-demo {
+    position: fixed; right: 20px; bottom: 20px; width: 220px; z-index: 50;
+    background: #10141D; border: 1px solid rgba(56,189,248,.3); border-radius: 18px;
+    padding: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.6); cursor: pointer;
+  }
+  .floating-demo .bot { max-width: none; }
+  @media (max-width: 640px) { .floating-demo { width: 150px; right: 12px; bottom: 12px; } }
+</style>
+</head>
+<body>
+  <div class="preview-banner">Preview only — not live yet</div>
+
+  <div class="stage">
+    <div class="card">
+      <h2>Header/hero size</h2>
+      <div id="avatar-hero" class="bot"></div>
+      <div class="bubble" id="bubble-hero"><b>Strobi</b> — your 24/7 shift greets every visitor.</div>
+      <div class="controls">
+        <button data-anim="idle">Idle</button>
+        <button data-anim="listening">Listening</button>
+        <button data-anim="thinking">Thinking</button>
+        <button data-anim="working">Working</button>
+        <button data-anim="excited">Excited</button>
+        <button data-anim="celebrate">Celebrate</button>
+        <button data-anim="sleeping">Sleep</button>
+        <button data-anim="waking">Wake</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>As a floating widget (bottom-right corner)</h2>
+      <div class="bubble">Click the widget below → it reacts. This corner placement matches the current site's scout-drone position.</div>
+      <div class="controls">
+        <button data-corner="working">Scenario: page loads → working</button>
+        <button data-corner="idle">Scenario: after 4s → idle</button>
+        <button data-corner="celebrate">Scenario: deal form submitted → celebrate</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="floating-demo" id="corner-bot" title="Strobi — SecondShift on-screen bot">
+    <div id="avatar-corner" class="bot"></div>
+  </div>
+
+  <p class="credit">
+    Avatar: <b>Strobi</b> from <a href="https://github.com/smontlouis/bible-strong-avatar-lab" rel="noopener">bible-strong-avatar-lab</a>
+    (procedural 2D avatars, AGPL-3.0). Embedded via its official
+    <code>@bible-strong/avatar-web</code> renderer; attribution + source link kept as required by the license.
+  </p>
+
+  <script type="module">
+    import { createAvatar } from '/bot/avatar-standalone.js';
+
+    const definition = await (await fetch('/bot/strobi.avatar.json')).json();
+
+    // Hero-sized instance
+    const hero = createAvatar('#avatar-hero', { definition, defaultAnimation: 'idle', size: '100%' });
+    document.querySelectorAll('[data-anim]').forEach((b) =>
+      b.addEventListener('click', () => hero.play(b.dataset.anim)));
+
+    const bubbles = {
+      idle: '<b>Strobi</b> — standing by. Ask me anything, anytime.',
+      listening: "<b>Strobi</b> — I'm listening…",
+      thinking: '<b>Strobi</b> — mapping your workflow onto the crew…',
+      working: '<b>Strobi</b> — shipping while you sleep.',
+      excited: '<b>Strobi</b> — the shift just landed another deal!',
+      celebrate: '<b>Strobi</b> — 🎉 deal received. Rishi will reply within 2 hours.',
+      sleeping: '<b>Strobi</b> — the shift never really sleeps… but hero renders!',
+      waking: '<b>Strobi</b> — clocking in.',
+    };
+
+    // Floating-corner instance
+    const corner = createAvatar('#avatar-corner', { definition, defaultAnimation: 'working', size: '100%' });
+    const bubble = document.getElementById('bubble-hero');
+    document.querySelectorAll('[data-corner]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const a = b.dataset.corner;
+        corner.play(a);
+        bubble.innerHTML = bubbles[a] || '';
+      }));
+    document.getElementById('corner-bot').addEventListener('click', () => {
+      corner.play('happy');
+      bubble.innerHTML = "<b>Strobi</b> — hi there! I'm the SecondShift bot.";
+    });
+  </script>
+</body>
+</html>
