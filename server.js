@@ -61,7 +61,21 @@ async function dograhProbe() {
 /** One-tap repair: re-run the tunnel watchdog (restarts dead tunnels, updates endpoints, pushes).
  *  Fire-and-forget spawn (detached, unref'd) — NEVER await docker inside the
  *  server process; the Windows pipe-hang that wedged the 01:03 scheduler run
- *  must not be reproducible here. Result arrives in watchdog.log + heartbeat. */
+ *  must not be reproducible here. Result arrives in watchdog.log + heartbeat.
+ *  Remote mode (bot on Render): when PC_RELAY_TARGET + PC_RELAY_TOKEN are
+ *  set, the fix is executed ON THE PC through the office-tunnel relay, with
+ *  the local spawn kept as fallback (bot-on-PC case). */
+async function dograhFixViaRelayOrLocal() {
+  const target = (process.env.PC_RELAY_TARGET || '').trim();
+  if (target && PC_RELAY_TOKEN) {
+    try {
+      const r = await fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + PC_RELAY_TOKEN }, body: JSON.stringify({ action: 'fix-dograh' }), signal: AbortSignal.timeout(45000) });
+      const j = await r.json().catch(() => ({}));
+      return { ok: !!j.ok, via: 'pc-relay', detail: j.detail || j.error || ('HTTP ' + r.status) };
+    } catch (e) { /* relay unreachable — fall through to local spawn */ }
+  }
+  return runDograhWatchdog();
+}
 function runDograhWatchdog() {
   const { spawn } = require('child_process');
   const child = spawn(process.execPath, [path.join(__dirname, 'scripts', 'dograh-watchdog.js')],
@@ -325,8 +339,19 @@ app.use('/dograh-endpoints.json', (req, res) => res.status(404).end());
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+    // hashed bundle files are immutable — a new build gets a new name
+    else if (filePath.includes(path.join('assets', 'index-'))) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   },
 }));
+
+// Root serves the new React UI. The pre-2026-10 landing page stays reachable
+// at /index-old.html for instant comparison/rollback (hidden, not linked).
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// Named SPA routes — the React UI is a single page with in-page anchors, so
+// any stray deep link resolves to it instead of an Express 404 (the old
+// landing pages like /automations.html stay untouched static files).
+app.get(['/studio', '/studio/*'], (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -492,6 +517,51 @@ function readDograhEndpoints() {
   } catch (e) { /* file missing/malformed — fall through to env */ }
   return null;
 }
+/* ── PC relay (added 2026-10-12): command this PC from the Telegram bot ──
+ * The bot lives on Render; /agent tasks and fix buttons used to have NO way
+ * to act on this PC (the tunnels, Docker stack and watchdog all live here).
+ * This endpoint is the bridge. Auth: a long random shared secret
+ * (PC_RELAY_TOKEN) lives in the PC .env AND in the Render bot's env — a
+ * request without exactly that token is rejected; without the token
+ * configured on the PC side, the relay is fully disabled (inert). Reachable
+ * from the internet through the secondshift-office tunnel
+ * (status.secondshift.space → :7777 → this server), and never on the main
+ * site domain (Render serves that one — public surface stays clean). */
+const PC_RELAY_TOKEN = (process.env.PC_RELAY_TOKEN || '').trim();
+const RELAY_ACTIONS = {
+  'fix-dograh': () => runDograhWatchdog(),
+  'docker-status': async () => {
+    try {
+      const { execFile } = require('child_process');
+      const out = await new Promise((resolve, reject) => {
+        execFile('docker', ['ps', '--format', '{{.Names}} {{.Status}}'], { timeout: 15000, windowsHide: true }, (e, stdout, stderr) => e ? reject(e) : resolve(String(stdout)));
+      });
+      return { ok: true, detail: out.trim().split(/\r?\n/).slice(0, 12).join(' | ') };
+    } catch (e) { return { ok: false, detail: String(e.message).slice(0, 120) }; }
+  },
+  'health': async () => {
+    const probe = await dograhProbe();
+    const dock = await new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      execFile('docker', ['ps', '--format', '{{.RunningFor}}'], { timeout: 15000, windowsHide: true }, (e) => resolve(e ? 'docker: DOWN' : 'docker: up'));
+    });
+    return { ok: probe.ok && dock.startsWith('docker: up'), detail: probe.detail || ('free line ' + (probe.ok ? '200' : 'down') + ', ' + dock) };
+  },
+};
+app.post('/api/pc-relay', async (req, res) => {
+  if (!PC_RELAY_TOKEN) return res.status(404).json({ ok: false, error: 'relay disabled (no PC_RELAY_TOKEN on this PC)' });
+  if (!safeEqual(String((req.headers.authorization || '').replace(/^Bearer\s+/i, '')), PC_RELAY_TOKEN)) return res.status(401).json({ ok: false, error: 'bad relay token' });
+  const action = String((req.body || {}).action || '');
+  const fn = RELAY_ACTIONS[action];
+  if (!fn) return res.status(400).json({ ok: false, error: 'unknown action', known: Object.keys(RELAY_ACTIONS) });
+  try {
+    const out = await fn();
+    res.json({ ok: out.ok !== false, action, detail: String(out.detail || '').slice(0, 400) });
+  } catch (e) {
+    res.json({ ok: false, action, detail: String((e && e.message) || e).slice(0, 400) });
+  }
+});
+
 app.get('/api/dograh/config', async (req, res) => {
   const eps = await resolveEndpoints();
   const token = (eps && eps.token) || process.env.DOGRAH_EMBED_TOKEN || '';
@@ -754,8 +824,10 @@ if (require.main === module) {
       return { message: '🤖 ' + a.backend + ' · runs=' + a.runs + ' failed=' + a.failed + (a.running ? ' · RUNNING now' : ' · idle') + (a.lastError ? ' · lastError: ' + String(a.lastError).slice(0, 100) : '') };
     });
     tmon.registerFix('fix-dograh-tunnels', () => {
-      const r = runDograhWatchdog();
-      if (!r.ok) throw new Error('watchdog spawn failed: ' + (r.detail || 'unknown'));
+      Promise.resolve(dograhFixViaRelayOrLocal()).then((r) => {
+        if (!r.ok) throw new Error('repair dispatch failed: ' + (r.detail || 'unknown'));
+        tmon.send('🛠 ' + (r.via === 'pc-relay' ? 'PC relay accepted the command — ' : 'Watchdog spawned — ') + (r.detail || 'repair in progress')).catch(() => {});
+      }).catch((e) => tmon.send('⚠ fix-dograh-tunnels: ' + String(e.message).slice(0, 160)).catch(() => {}));
       // fire-and-forget repair — report the outcome as a follow-up message
       // once the watchdog has had time to recreate tunnels + push endpoints
       setTimeout(() => {
@@ -766,7 +838,7 @@ if (require.main === module) {
           tmon.send(msg).catch(() => {});
         });
       }, 100 * 1000);
-      return { message: '🛠 Watchdog spawned — ' + (r.detail || 'repair in progress') };
+      return { message: '🛠 Repair dispatched — details follow here in ~2 min.' };
     });
   } else {
     console.log('[monitor] Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID) — running without remote eyes');

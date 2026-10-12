@@ -58,11 +58,41 @@ const PERM_UI = (process.env.DOGRAH_PERM_UI || 'https://voice-ui.secondshift.spa
 const ORIGIN_CONTAINERS = ['dograh-api-1', 'dograh-ui-1', 'dograh-postgres-1', 'dograh-redis-1'];
 const COMPOSE_FILE = path.join(ROOT, 'dograh', 'docker-compose.yaml');
 
+// The EXE lives in %LOCALAPPDATA%\Programs\DockerDesktop on this install
+// (not Program Files) — resolve dynamically so an update never breaks us.
+function dockerDesktopExe() {
+  const candidates = [process.env.DOCKER_DESKTOP_EXE, path.join(process.env.LOCALAPPDATA || '', 'Programs', 'DockerDesktop', 'Docker Desktop.exe'), 'C:\\Program Files\Docker\Docker\Docker Desktop.exe'].filter(Boolean);
+  for (const p of candidates) { if (p && fs.existsSync(p)) return p; }
+  return null;
+}
 async function listRunningContainers() {
   try {
     const out = await sh('docker ps --format "{{.Names}}"', { timeout: 15000 });
     return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  } catch (e) { return null; } // docker unreachable — never assume the stack is down
+  } catch (e) {
+    // Docker daemon unreachable — the #1 real-world cause on this PC:
+    // after sleep or reboot Docker Desktop itself is NOT running (its pipe
+    // is gone), so every docker command fails and no amount of container
+    // healing can help. Wake Docker Desktop (fire-and-forget) and wait (up
+    // to 5 min) for the daemon to answer; only give up after that. Tune
+    // or disable with WATCHDOG_DOCKER_WAKE_MS (0 disables waking).
+    const exe = dockerDesktopExe();
+    if (!exe) { log('docker unreachable and Docker Desktop.exe not found - cannot self-wake'); return null; }
+    log('docker daemon unreachable - waking Docker Desktop');
+    try { spawn('start "" "' + exe + '"', { cwd: ROOT, shell: true }); } catch (_) {}
+    const deadline = Date.now() + (Number(process.env.WATCHDOG_DOCKER_WAKE_MS) || 300000);
+    while (Date.now() < deadline) {
+      await sleep(2000);
+      try {
+        const out = await sh('docker version --format "{{.Server.Version}}"', { timeout: 10000 });
+        if (out.trim()) { log('docker daemon is back (' + out.trim() + ') - continuing'); break; }
+      } catch (_) {}
+    }
+    try {
+      const out = await sh('docker ps --format "{{.Names}}"', { timeout: 15000 });
+      return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    } catch (_) { return null; }
+  }
 }
 
 /** Brings the app containers back if any of them is stopped. */

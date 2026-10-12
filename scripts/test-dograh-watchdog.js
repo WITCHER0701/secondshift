@@ -71,6 +71,8 @@ const a=process.argv.slice(2).join(' ');
 const APP=['dograh-api-1','dograh-ui-1','dograh-postgres-1','dograh-redis-1'];
 const TUN=['dograh-ui-tunnel','cloudflared-tunnel'];
 if(!st.running) st.running = st.originDown ? TUN : TUN.concat(APP);
+if(a.startsWith('version')){st.daemonWakes=true;st.daemonDown=false;fs.writeFileSync(process.env.SHIM_DATA+'/state.json',JSON.stringify(st));console.log('24.0.0');}
+if(st.daemonDown){console.error('fake docker: daemon down');process.exit(1);}
 if(a.startsWith('logs cloudflared-tunnel')){console.log(st.apiLogs);}
 else if(a.startsWith('logs dograh-ui-tunnel')){console.log(st.uiLogs);}
 else if(a.startsWith('ps ')){console.log(st.running.join('\\n'));}
@@ -252,6 +254,20 @@ const readSends = () => JSON.parse(fs.readFileSync(path.join(SHIM_DIR, 'tg-sends
   r = await runScenario();
   t(!readState().originRepaired, 'healthy origin → no compose calls', 'repaired=' + readState().originRepaired);
   t(readSends().length === 0, 'healthy origin → no telegram noise', JSON.stringify(readSends()).slice(0, 120));
+
+  // ── 14 — Docker Desktop itself down (sleep/reboot) → wakes it, then heals ──
+  // The #1 real-world outage: after sleep/reboot Docker Desktop is NOT
+  // running, so every docker command fails. The watchdog must wake Docker
+  // Desktop and continue healing instead of logging failures and leaving.
+  writeEp({ token: 'emb_x', uiUrl: GOOD_UI, apiUrl: GOOD_API, updatedAt: 'old' });
+  regLogs(GOOD_API, GOOD_UI);
+  scenarioState.daemonDown = true;
+  scenarioState.recycles = 0;
+  r = await runScenario({ WATCHDOG_DOCKER_WAKE_MS: '2000' });
+  t(readState().daemonWakes === true && readState().daemonDown === false, 'docker down → daemon got woken (docker version answered)', JSON.stringify(readState()));
+  t(readState().recycles === 0, 'docker down wake run → tunnels not churned (stack was fine)', 'recycles=' + readState().recycles);
+  t(r.lines.join(' ').includes('waking Docker Desktop') || r.lines.join(' ').includes('daemon is back'), 'docker down wake run → wake logged', r.lines.filter((l) => /waking|daemon/.test(l)).join(' | ').slice(0, 160));
+  scenarioState.daemonDown = false;
 
   realLog(ok ? '\nALL PASS' : '\nFAILURES PRESENT');
   process.exit(ok ? 0 : 1);

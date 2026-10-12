@@ -89,6 +89,20 @@ const httpGet = (urlPath) =>
     const jargon = autos.body.match(JARGON) || [];
     t(jargon.length === 0, 'served automation content is clean', [...new Set(jargon)].join(', ') || 'clean');
 
+    // The bundle powering the new React landing UI must be clean too — it's
+    // the largest public surface now. mangled-path JS + built CSS.
+    const idx = await httpGet('/');
+    if (idx && idx.body.includes('/assets/index-')) {
+      const m = idx.body.match(/\/assets\/index-[A-Za-z0-9_-]+\.js/g);
+      if (m && m.length) {
+        const b = await httpGet(m[0]);
+        if (b) {
+          const bHits = b.body.match(JARGON) || [];
+          t(bHits.length === 0, 'new UI bundle leaks no stack/vendor names', [...new Set(bHits)].slice(0, 5).join(', ') || 'clean');
+        }
+      }
+    }
+
     // Every public payload the site fetches, checked for stack/vendor leaks
     // and for anything resembling a real credential.
     // (/api/dograh/config is deliberately absent here — its URLs are the one
