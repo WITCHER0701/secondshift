@@ -47,13 +47,23 @@
   var dataPage = (document.currentScript && document.currentScript.getAttribute('data-page')) || '';
   var isPhone = /iPhone|Android|webOS|BlackBerry|Opera Mini|IEMobile/i.test(navigator.userAgent);
   var sizePx = isPhone ? 64 : 84;
+  var eyeColor = (CHARACTERS[skinId] || {}).eye || '#38bdf8';
+  function hexAlpha(hex, a) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return hex;
+    var n = parseInt(m[1], 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  // full shadow strings — box-shadow needs offsets, a bare color would be invalid
+  var glowSoft = '0 10px 44px ' + hexAlpha(eyeColor, 0.45);
+  var glowCalm = '0 10px 36px ' + hexAlpha(eyeColor, 0.25);
 
   // ── shell ───────────────────────────────────────────────────────────
   var style = document.createElement('style');
   style.textContent = [
     '.ss-strobi{position:fixed;right:14px;bottom:14px;z-index:2147483000;touch-action:manipulation}',
-    '.ss-strobi-btn{width:' + sizePx + 'px;height:' + sizePx + 'px;border-radius:26px;overflow:hidden;display:block;cursor:pointer;background:#10141D/90;border:1px solid rgba(56,189,248,.3);box-shadow:0 10px 36px rgba(56,189,248,.25);transition:transform .15s, box-shadow .15s;padding:0}',
-    '.ss-strobi-btn:hover{transform:scale(1.06);box-shadow:0 10px 44px rgba(56,189,248,.45)}',
+    '.ss-strobi-btn{width:' + sizePx + 'px;height:' + sizePx + 'px;border-radius:26px;overflow:hidden;display:block;cursor:pointer;background:#10141D/90;border:1px solid rgba(56,189,248,.3);box-shadow:var(--strobi-calm, rgba(56,189,248,.25));transition:transform .15s, box-shadow .15s;padding:0}',
+    '.ss-strobi-btn:hover{transform:scale(1.06);box-shadow:var(--strobi-glow, rgba(56,189,248,.45))}',
     '.ss-strobi-host{width:100%;height:100%}',
     '.ss-strobi-card{position:fixed;right:14px;bottom:' + (sizePx + 22) + 'px;width:248px;background:#161B26;border:1px solid rgba(56,189,248,.3);border-radius:16px;padding:14px;color:#e2e2e8;font:12px/1.55 Inter,system-ui,sans-serif;box-shadow:0 12px 40px rgba(0,0,0,.55);z-index:2147483000}',
     '.ss-strobi-card b{color:#8ed5ff;font-weight:600}',
@@ -78,6 +88,7 @@
 
   var wrap = document.createElement('div');
   wrap.className = 'ss-strobi';
+  try { wrap.style.setProperty('--strobi-glow', glowSoft); wrap.style.setProperty('--strobi-calm', glowCalm); } catch (e) {}
   var btn = document.createElement('button');
   btn.className = 'ss-strobi-btn';
   btn.type = 'button';
